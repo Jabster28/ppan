@@ -4,7 +4,7 @@ default:
   before_script:
     - rustc --version 
     - cargo --version
-    - apt-get update -qq && apt-get install alsa-base alsa-utils -qq
+    - apt-get update -qq && apt-get install alsa-utils -qq
 stages:
   - test
 
