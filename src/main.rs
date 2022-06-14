@@ -1,4 +1,6 @@
 #![feature(unboxed_closures)]
+use ggez_egui::egui::{ProgressBar, Slider};
+use ggez_egui::{egui, EguiBackend};
 
 use derive_new::new;
 use ggez::event::{self, KeyCode};
@@ -7,14 +9,13 @@ use ggez::input::keyboard;
 // use ggez::mint::Point2;
 use ggez::{Context, GameResult};
 use glam::*;
-use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
-// use macroquad::math;
-// paddle for pong
 mod input_handlers;
+use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
 
-struct MainState {
+struct GameState {
     left_paddles: Vec<Paddle>,
     right_paddles: Vec<Paddle>,
+    egui: EguiBackend,
 }
 
 #[derive(new)]
@@ -26,8 +27,9 @@ struct Paddle {
     width: f32,
     #[new(value = "100.0")]
     height: f32,
-    #[new(default)]
-    texture_id: u16,
+    // #[new(default)]
+    // texture_id: u16,
+
     // rotation in radians
     #[new(default)]
     rotation: f32,
@@ -71,9 +73,9 @@ struct Paddle {
 //     }
 // }
 
-impl MainState {
-    fn new() -> GameResult<MainState> {
-        let s = MainState {
+impl GameState {
+    fn new() -> GameResult<GameState> {
+        let s = GameState {
             left_paddles: vec![Paddle::new(
                 40.0,
                 Box::new(KeyboardInputHandler::new(
@@ -86,13 +88,35 @@ impl MainState {
                 )),
             )],
             right_paddles: vec![Paddle::new(760.0, Box::new(EmptyInputHandler {}))],
+            egui: EguiBackend::default(),
         };
         Ok(s)
     }
 }
 
-impl event::EventHandler<ggez::GameError> for MainState {
+impl event::EventHandler<ggez::GameError> for GameState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
+        // update window size
+        let (width, height) = graphics::drawable_size(_ctx);
+        graphics::set_screen_coordinates(
+            _ctx,
+            graphics::Rect::new(0.0, 0.0, width as f32, height as f32),
+        )?;
+
+        let egui_ctx = self.egui.ctx();
+        egui::Window::new("egui-window").show(&egui_ctx, |ui| {
+            // add a readonly slider that shows x and y
+            let fps = ProgressBar::new((ggez::timer::fps(_ctx) / 60.0) as f32)
+                .text(format!("{} FPS", ggez::timer::fps(_ctx).round()));
+
+            ui.add(fps);
+            if ui.button("quit").clicked() {
+                std::process::exit(0);
+            }
+
+            ui.allocate_space(ui.available_size());
+        });
+
         let rot_accel = 0.8;
         // let targetfps = 6000;
         // while ggez::timer::check_update_time(_ctx, targetfps) {
@@ -294,18 +318,19 @@ impl event::EventHandler<ggez::GameError> for MainState {
             paddle.rotation += paddle.rotation_velocity;
 
             // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
-            println!(
-            "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
-            // pad start to 3 chars
-            paddle.x.round(),
-            paddle.y.round(),
-            paddle.going_acw,
-            paddle.going_cw,
-            paddle.rotation.round(),
-            paddle.rotation_velocity.round(),
-            paddle.next_stop.round(),
-            ggez::timer::fps(_ctx).round()
-       );
+            // println!(
+            //     "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
+            //     // pad start to 3 chars
+            //     paddle.x.round(),
+            //     paddle.y.round(),
+            //     paddle.going_acw,
+            //     paddle.going_cw,
+            //     paddle.rotation.round(),
+            //     paddle.rotation_velocity.round(),
+            //     paddle.next_stop.round(),
+            //     ggez::timer::fps(_ctx).round()
+            // );!!
+
             // speed calculations
             paddle.x += paddle.velocity_x * delta_time;
             paddle.velocity_x *= 1.0 - paddle.friction;
@@ -339,6 +364,8 @@ impl event::EventHandler<ggez::GameError> for MainState {
     }
 
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
+        let (width, height) = graphics::drawable_size(ctx);
+
         graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
 
         // let circle = graphics::Mesh::new_circle(
@@ -357,14 +384,36 @@ impl event::EventHandler<ggez::GameError> for MainState {
             .chain(self.right_paddles.iter_mut());
 
         // draw paddles
+        // we have to scale the rectangle by the screen's size over 800x600, since that's what the game's expecting
+
+        // step 1: check if we need letterboxing
+        let real_ratio = width as f32 / height as f32;
+        let dummy_ratio = 800.0 / 600.0;
+        let extra_width: f32;
+        let extra_height: f32;
+        if real_ratio > dummy_ratio {
+            // we need letterboxing
+            extra_height = 0.0;
+            extra_width = width - (height * dummy_ratio);
+        } else if real_ratio < dummy_ratio {
+            // we need letterboxing
+            extra_width = 0.0;
+            extra_height = height - (width / dummy_ratio);
+        } else {
+            // we don't need letterboxing
+            extra_width = 0.0;
+            extra_height = 0.0;
+        }
+        let playarea_width = width - extra_width;
+        let playarea_height = height - extra_height;
 
         for paddle in paddles {
             // draw rotated rectangle
             let rectangle = Rect {
                 x: 0.0,
                 y: 0.0,
-                w: paddle.width,
-                h: paddle.height,
+                w: paddle.width * playarea_width / 800.0,
+                h: paddle.height * playarea_height / 600.0,
             };
 
             let rect = graphics::Mesh::new_rectangle(
@@ -377,22 +426,62 @@ impl event::EventHandler<ggez::GameError> for MainState {
                 ctx,
                 &rect,
                 graphics::DrawParam::new()
-                    .dest(Vec2::new(paddle.x, paddle.y))
+                    .dest(Vec2::new(
+                        extra_width / 2.0 + paddle.x * playarea_width / 800.0,
+                        extra_height / 2.0 + paddle.y * playarea_height / 600.0,
+                    ))
                     .rotation(paddle.rotation * (std::f64::consts::PI as f32) / 180.0)
-                    .offset(Vec2::new(paddle.width / 2.0, paddle.height / 2.0)),
+                    .offset(Vec2::new(
+                        (paddle.width * playarea_width / 800.0) / 2.0,
+                        (paddle.height * playarea_height / 600.0) / 2.0,
+                    )),
             )?;
         }
+        graphics::draw(ctx, &self.egui, graphics::DrawParam::default())?;
 
         graphics::present(ctx)?;
         Ok(())
     }
+
+    fn mouse_button_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        button: event::MouseButton,
+        _x: f32,
+        _y: f32,
+    ) {
+        self.egui.input.mouse_button_down_event(button);
+    }
+
+    fn mouse_button_up_event(
+        &mut self,
+        _ctx: &mut Context,
+        button: event::MouseButton,
+        _x: f32,
+        _y: f32,
+    ) {
+        self.egui.input.mouse_button_up_event(button);
+    }
+
+    fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
+        self.egui.input.mouse_motion_event(x, y);
+    }
 }
 
-pub fn main() -> GameResult {
+fn main() -> GameResult {
     // uncap fps
 
-    let cb = ggez::ContextBuilder::new("pong", "joob");
-    let (ctx, event_loop) = cb.build()?;
-    let state: MainState = MainState::new()?;
+    let cb = ggez::ContextBuilder::new("pong", "Jabster28").window_mode(
+        ggez::conf::WindowMode::default()
+            .resizable(true)
+            .maximized(true),
+    );
+
+    let (mut ctx, event_loop) = cb.build()?;
+    // set fullscreen
+    ggez::graphics::set_fullscreen(&mut ctx, ggez::conf::FullscreenType::Windowed)?;
+
+    let state: GameState = GameState::new()?;
+
     event::run(ctx, event_loop, state)
 }
