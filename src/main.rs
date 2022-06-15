@@ -83,11 +83,21 @@ impl GameState {
                     KeyCode::S,
                     KeyCode::A,
                     KeyCode::D,
-                    KeyCode::L,
-                    KeyCode::J,
+                    KeyCode::V,
+                    KeyCode::C,
                 )),
             )],
-            right_paddles: vec![Paddle::new(760.0, Box::new(EmptyInputHandler {}))],
+            right_paddles: vec![Paddle::new(
+                760.0,
+                Box::new(KeyboardInputHandler::new(
+                    KeyCode::I,
+                    KeyCode::K,
+                    KeyCode::J,
+                    KeyCode::L,
+                    KeyCode::Period,
+                    KeyCode::Comma,
+                )),
+            )],
             egui: EguiBackend::default(),
         };
         Ok(s)
@@ -207,7 +217,7 @@ impl event::EventHandler<ggez::GameError> for GameState {
                 while paddle.rotation < 0.0 {
                     paddle.rotation += 360.0;
                 }
-                paddle.rotation = paddle.rotation % 360.0;
+                paddle.rotation %= 360.0;
 
                 // first, calculate clockwise and anticlockwise rotations
                 let mut first_displacement = paddle.next_stop - paddle.rotation;
