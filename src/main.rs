@@ -356,12 +356,12 @@ impl event::EventHandler<ggez::GameError> for GameState {
                 paddle.x = 800.0 - paddle.width / 2.0;
                 paddle.velocity_x = 0.0;
             }
-            // 0 > y > 500
+            // 0 > y > 600
             if paddle.y < 0.0 {
                 paddle.y = 0.0;
                 paddle.velocity_y = 0.0;
-            } else if paddle.y > 500.0 {
-                paddle.y = 500.0;
+            } else if paddle.y > 600.0 {
+                paddle.y = 600.0;
                 paddle.velocity_y = 0.0;
             }
             // }
