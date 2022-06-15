@@ -16,8 +16,15 @@ struct GameState {
     left_paddles: Vec<Paddle>,
     right_paddles: Vec<Paddle>,
     egui: EguiBackend,
+    ui: UiState,
 }
-
+struct UiState {
+    debug: DebugState,
+}
+struct DebugState {
+    show_debug: bool,
+    show_playarea: bool,
+}
 #[derive(new)]
 struct Paddle {
     x: f32,
@@ -99,6 +106,12 @@ impl GameState {
                 )),
             )],
             egui: EguiBackend::default(),
+            ui: UiState {
+                debug: DebugState {
+                    show_debug: true,
+                    show_playarea: false,
+                },
+            },
         };
         Ok(s)
     }
@@ -114,18 +127,26 @@ impl event::EventHandler<ggez::GameError> for GameState {
         )?;
 
         let egui_ctx = self.egui.ctx();
-        egui::Window::new("egui-window").show(&egui_ctx, |ui| {
-            // add a readonly slider that shows x and y
-            let fps = ProgressBar::new((ggez::timer::fps(_ctx) / 60.0) as f32)
-                .text(format!("{} FPS", ggez::timer::fps(_ctx).round()));
+        egui::Window::new("Debug Menu")
+            .open(&mut self.ui.debug.show_debug)
+            .show(&egui_ctx, |ui| {
+                let fps = ProgressBar::new((ggez::timer::fps(_ctx) / 60.0) as f32)
+                    .text(format!("{} FPS", ggez::timer::fps(_ctx).round()));
+                ui.add(fps);
 
-            ui.add(fps);
-            if ui.button("quit").clicked() {
-                std::process::exit(0);
-            }
+                ui.label(format!(
+                    "x: {} y: {}",
+                    self.left_paddles[0].x, self.left_paddles[0].y
+                ));
 
-            ui.allocate_space(ui.available_size());
-        });
+                if ui.button("quit").clicked() {
+                    std::process::exit(0);
+                }
+
+                ui.checkbox(&mut self.ui.debug.show_playarea, "show playarea");
+
+                ui.allocate_space(ui.available_size());
+            });
 
         let rot_accel = 0.8;
         // let targetfps = 6000;
@@ -135,6 +156,10 @@ impl event::EventHandler<ggez::GameError> for GameState {
             // quit the game
             println!("Quitting game!");
             std::process::exit(0);
+        }
+
+        if keyboard::is_key_pressed(_ctx, KeyCode::Backslash) {
+            self.ui.debug.show_debug = true;
         }
         let delta_time = ggez::timer::delta(_ctx).as_secs_f32();
 
@@ -376,25 +401,9 @@ impl event::EventHandler<ggez::GameError> for GameState {
     fn draw(&mut self, ctx: &mut Context) -> GameResult {
         let (width, height) = graphics::drawable_size(ctx);
 
-        graphics::clear(ctx, [0.1, 0.2, 0.3, 1.0].into());
+        graphics::clear(ctx, [0.1, 0.2, 0.0, 1.0].into());
 
-        // let circle = graphics::Mesh::new_circle(
-        //     ctx,
-        //     graphics::DrawMode::fill(),
-        //     Vec2::new(0.0, 0.0),
-        //     100.0,
-        //     2.0,
-        //     Color::WHITE,
-        // )?;
-
-        // update paddles
-        let paddles = self
-            .left_paddles
-            .iter_mut()
-            .chain(self.right_paddles.iter_mut());
-
-        // draw paddles
-        // we have to scale the rectangle by the screen's size over 800x600, since that's what the game's expecting
+        // we have to scale everything by the screen's size over 800x600, since that's what the game's expecting
 
         // step 1: check if we need letterboxing
         let real_ratio = width as f32 / height as f32;
@@ -417,8 +426,38 @@ impl event::EventHandler<ggez::GameError> for GameState {
         let playarea_width = width - extra_width;
         let playarea_height = height - extra_height;
 
+        // step 2: draw the playarea (if we need it)
+        if self.ui.debug.show_playarea {
+            // visualise actual play area
+            let playarearect = graphics::Rect::new(
+                extra_width / 2.0,
+                extra_height / 2.0,
+                playarea_width,
+                playarea_height,
+            );
+
+            let rect = graphics::Mesh::new_rectangle(
+                ctx,
+                graphics::DrawMode::fill(),
+                playarearect,
+                // need to convert [0.1, 0.2, 0.3, 1.0] into ints by * by 255
+                Color::from_rgba(
+                    (0.1 as f32 * 255.0 as f32).round() as u8,
+                    (0.2 as f32 * 255.0 as f32).round() as u8,
+                    (0.3 as f32 * 255.0 as f32).round() as u8,
+                    255,
+                ),
+            )?;
+            graphics::draw(ctx, &rect, graphics::DrawParam::default())?;
+        }
+
+        let paddles = self
+            .left_paddles
+            .iter_mut()
+            .chain(self.right_paddles.iter_mut());
+
+        // step 3: draw paddles
         for paddle in paddles {
-            // draw rotated rectangle
             let rectangle = Rect {
                 x: 0.0,
                 y: 0.0,
