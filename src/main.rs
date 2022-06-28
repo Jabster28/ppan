@@ -11,14 +11,17 @@ use glam::*;
 mod input_handlers;
 use input_handlers::{InputHandler, KeyboardInputHandler};
 
-struct GameState {
-    left_paddles: Vec<Paddle>,
-    right_paddles: Vec<Paddle>,
+struct PpanState {
+    table: TableState,
     egui: EguiBackend,
     ui: UiState,
 }
 struct UiState {
     debug: DebugState,
+}
+struct TableState {
+    left_paddles: Vec<Paddle>,
+    right_paddles: Vec<Paddle>,
 }
 struct DebugState {
     show_debug: bool,
@@ -79,31 +82,33 @@ struct Paddle {
 //     }
 // }
 
-impl GameState {
-    fn new() -> GameResult<GameState> {
-        let s = GameState {
-            left_paddles: vec![Paddle::new(
-                40.0,
-                Box::new(KeyboardInputHandler::new(
-                    KeyCode::W,
-                    KeyCode::S,
-                    KeyCode::A,
-                    KeyCode::D,
-                    KeyCode::V,
-                    KeyCode::C,
-                )),
-            )],
-            right_paddles: vec![Paddle::new(
-                760.0,
-                Box::new(KeyboardInputHandler::new(
-                    KeyCode::I,
-                    KeyCode::K,
-                    KeyCode::J,
-                    KeyCode::L,
-                    KeyCode::Period,
-                    KeyCode::Comma,
-                )),
-            )],
+impl PpanState {
+    fn new() -> GameResult<PpanState> {
+        let s = PpanState {
+            table: TableState {
+                left_paddles: vec![Paddle::new(
+                    40.0,
+                    Box::new(KeyboardInputHandler::new(
+                        KeyCode::W,
+                        KeyCode::S,
+                        KeyCode::A,
+                        KeyCode::D,
+                        KeyCode::V,
+                        KeyCode::C,
+                    )),
+                )],
+                right_paddles: vec![Paddle::new(
+                    760.0,
+                    Box::new(KeyboardInputHandler::new(
+                        KeyCode::I,
+                        KeyCode::K,
+                        KeyCode::J,
+                        KeyCode::L,
+                        KeyCode::Period,
+                        KeyCode::Comma,
+                    )),
+                )],
+            },
             egui: EguiBackend::default(),
             ui: UiState {
                 debug: DebugState {
@@ -116,7 +121,7 @@ impl GameState {
     }
 }
 
-impl event::EventHandler<ggez::GameError> for GameState {
+impl event::EventHandler<ggez::GameError> for PpanState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
         // update window size
         let (width, height) = graphics::drawable_size(_ctx);
@@ -135,7 +140,7 @@ impl event::EventHandler<ggez::GameError> for GameState {
 
                 ui.label(format!(
                     "x: {} y: {}",
-                    self.left_paddles[0].x, self.left_paddles[0].y
+                    self.table.left_paddles[0].x, self.table.left_paddles[0].y
                 ));
 
                 if ui.button("quit").clicked() {
@@ -164,9 +169,10 @@ impl event::EventHandler<ggez::GameError> for GameState {
 
         // update paddles
         let paddles = self
+            .table
             .left_paddles
             .iter_mut()
-            .chain(self.right_paddles.iter_mut());
+            .chain(self.table.right_paddles.iter_mut());
 
         for paddle in paddles {
             paddle.input_handler.tick(_ctx).unwrap();
@@ -426,9 +432,10 @@ impl event::EventHandler<ggez::GameError> for GameState {
         }
 
         let paddles = self
+            .table
             .left_paddles
             .iter_mut()
-            .chain(self.right_paddles.iter_mut());
+            .chain(self.table.right_paddles.iter_mut());
 
         // step 3: draw paddles
         for paddle in paddles {
@@ -518,7 +525,7 @@ fn main() -> GameResult {
     // set fullscreen
     ggez::graphics::set_fullscreen(&mut ctx, ggez::conf::FullscreenType::Windowed)?;
 
-    let state: GameState = GameState::new()?;
+    let state: PpanState = PpanState::new()?;
 
     event::run(ctx, event_loop, state)
 }
