@@ -9,6 +9,16 @@ pub trait InputHandler {
     fn is_rotating_cw(&self) -> bool;
     fn is_rotating_acw(&self) -> bool;
     fn tick(&mut self, ctx: &mut Context) -> Result<(), String>;
+    // add a snapshot fn that returns a readonly copy of the state of the input handler
+    fn snapshot(&self) -> CurrentInputs;
+}
+pub struct CurrentInputs {
+    up: bool,
+    down: bool,
+    left: bool,
+    right: bool,
+    rotate_cw: bool,
+    rotate_acw: bool,
 }
 #[derive(Clone)]
 pub struct EmptyInputHandler {}
@@ -40,6 +50,16 @@ impl InputHandler for EmptyInputHandler {
 
     fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
         Ok(())
+    }
+    fn snapshot(&self) -> CurrentInputs {
+        CurrentInputs {
+            up: false,
+            down: false,
+            left: false,
+            right: false,
+            rotate_cw: false,
+            rotate_acw: false,
+        }
     }
 }
 #[derive(Clone)]
@@ -118,5 +138,15 @@ impl InputHandler for KeyboardInputHandler {
         self.rotating_cw = keyboard::is_key_pressed(ctx, self.rotate_cw_key);
         self.rotating_acw = keyboard::is_key_pressed(ctx, self.rotate_acw_key);
         Ok(())
+    }
+    fn snapshot(&self) -> CurrentInputs {
+        CurrentInputs {
+            up: self.going_up,
+            down: self.going_down,
+            left: self.going_left,
+            right: self.going_right,
+            rotate_cw: self.rotating_cw,
+            rotate_acw: self.rotating_acw,
+        }
     }
 }
