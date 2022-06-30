@@ -515,6 +515,18 @@ impl event::EventHandler<ggez::GameError> for GameState {
     fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
         self.egui.input.mouse_motion_event(x, y);
     }
+    fn key_down_event(
+        &mut self,
+        _ctx: &mut Context,
+        keycode: KeyCode,
+        _keymods: event::KeyMods,
+        _repeat: bool,
+    ) {
+        self.egui.input.key_down_event(keycode, _keymods)
+    }
+    fn text_input_event(&mut self, _ctx: &mut Context, character: char) {
+        self.egui.input.text_input_event(character);
+    }
 }
 
 fn main() -> GameResult {
