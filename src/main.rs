@@ -25,16 +25,23 @@ impl Config for GGRSConfig {
     type State = TableState; // Clone
     type Address = SocketAddr; // Clone + PartialEq + Eq + Hash
 }
+
+struct Player {
+    addr: PlayerType<SocketAddr>,
+    txt: String,
+}
 struct PpanState {
     table: TableState,
     egui: EguiBackend,
     ui: UiState,
     handlers: Vec<Handler>,
-    network_session: P2PSession<GGRSConfig>,
+    network_session: Option<P2PSession<GGRSConfig>>,
+    sess_builder: SessionBuilder<GGRSConfig>,
     skipping_frames: u32,
     last_update: Instant,
     accumulator: Duration,
     reversed_table: bool,
+    players: Vec<Player>,
 }
 
 struct UiState {
@@ -110,7 +117,7 @@ struct Handler {
 // }
 
 impl PpanState {
-    fn new(sess: P2PSession<GGRSConfig>, reversed_table: bool) -> GameResult<PpanState> {
+    fn new(sess: SessionBuilder<GGRSConfig>, reversed_table: bool) -> GameResult<PpanState> {
         let s = PpanState {
             table: TableState {
                 paddles: vec![
@@ -191,11 +198,13 @@ impl PpanState {
                     affected_paddles: vec![1],
                 },
             ],
-            network_session: (sess),
+            sess_builder: sess,
+            network_session: None,
             skipping_frames: 0,
             last_update: Instant::now(),
             accumulator: Duration::new(0, 0),
             reversed_table,
+            players: vec![],
         };
         Ok(s)
     }
@@ -209,7 +218,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
             _ctx,
             graphics::Rect::new(0.0, 0.0, width as f32, height as f32),
         )?;
-
         let egui_ctx = self.egui.ctx();
         egui::Window::new("Debug Menu")
             .open(&mut self.ui.debug.show_debug)
@@ -233,13 +241,90 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     self.handlers[1].input_handler.snapshot(),
                     self.handlers[1].input_handler.is_up()
                 ));
+                        ui.end_row();
+                if self.network_session.is_none()
+            {
+
+                for player in self.players.iter_mut() {
+                    ui.label(format!(
+                        "player type: {}",
+                        match player.addr {
+                            PlayerType::Local => 
+                                "local",
+                            PlayerType::Remote(_) => 
+                                "remote",
+                            PlayerType::Spectator(_) => 
+                                "spectator",
+                        },
+                        // match player.addr {
+                        //     PlayerType::Local => 
+                        //         "localhost".to_string(),
+                        //     PlayerType::Remote(addr) => 
+                        //         addr.to_string(),
+                        //     PlayerType::Spectator(addr) => 
+                        //         addr.to_string(),
+                        // }
+                    ));
+                    let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
+                        if (response).changed() {
+                            println!("maybe i should write rn");
+                            println!("{}", player.txt);
+                        }
+                        if (response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) ) {
+                        let socketaddr: Option<SocketAddr> = match player.txt.parse() {
+                            Ok(addr) => Some(addr),
+                            Err(_) => None,
+                        };
+
+                        if socketaddr.is_none() {
+                            println!("invalid address");
+                            player.txt = match player.addr {
+                                PlayerType::Local => 
+                                    "me".to_string(),
+                                PlayerType::Remote(addr) => 
+                                    addr.to_string(),
+                                PlayerType::Spectator(addr) => 
+                                    addr.to_string(),
+                            };
+                            return;
+                        } else {
+                            println!("new address: {}", socketaddr.unwrap());
+                            player.addr = PlayerType::Remote(socketaddr.unwrap());
+                        }
+                    }
+        ui.end_row();
+                }
+
+                if ui.button("add player").clicked() {
+                    self.players.push(Player {
+                        addr: PlayerType::Local,
+                        txt: "me".to_string(),
+                    });
+                } if ui.button("start").clicked() {
+                    self.players.iter_mut().enumerate().for_each(|(i, player)| {
+                        self.sess_builder = self.sess_builder.add_player(
+                            match player.addr {
+                                PlayerType::Local => 
+                                    PlayerType::Local,
+                                PlayerType::Remote(addr) => 
+                                    PlayerType::Remote(addr),
+                                PlayerType::Spectator(addr) => 
+                                    PlayerType::Spectator(addr),
+                            },
+                            i
+                        ).unwrap();
+                    });
+                    // self.network_session = Some(2);
+                }
+            }
 
                 if ui.button("quit").clicked() {
                     std::process::exit(0);
                 }
+                if self.network_session.is_some() {
                 let stats = self
-                    .network_session
-                    .network_stats(self.network_session.remote_player_handles()[0]);
+                    .network_session.as_ref().unwrap()
+                    .network_stats(self.network_session.as_ref().unwrap().remote_player_handles()[0]);
                 match stats {
                     Ok(stats) => {
                         ui.label(format!(
@@ -265,6 +350,9 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         ui.label(format!("network stats unavailable: {}", e));
                     },
                 }
+                         } else {
+                    ui.label("no network session active");
+                }
                 ui.checkbox(&mut self.ui.debug.show_playarea, "show playarea");
 
                 // ui.allocate_space(ui.available_size());
@@ -286,7 +374,10 @@ impl event::EventHandler<ggez::GameError> for PpanState {
         }
 
         // let mut delta_time = ggez::timer::delta(_ctx).as_secs_f32();
-        let sess = &mut self.network_session;
+        if self.network_session.is_none() {
+            return Ok(());
+        }
+        let sess = &mut self.network_session.as_mut().unwrap();
         sess.poll_remote_clients();
         // if sess.frames_ahead() > 0 {
         //     delta_time *= 1.1;
@@ -739,26 +830,9 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
 fn main() -> GameResult {
     let mut local_port = 7001;
-    let mut remote_addr: SocketAddr = "127.0.0.1:7002".parse().unwrap();
-    let socket = UdpNonBlockingSocket::bind_to_port(local_port).unwrap_or_else(|_| {
-        println!("Port {} taken, trying next port", local_port);
-        local_port += 1;
-        remote_addr = "127.0.0.1:7001".parse().unwrap();
-        UdpNonBlockingSocket::bind_to_port(local_port).unwrap()
-    });
     let mut sess = SessionBuilder::<GGRSConfig>::new()
         .with_num_players(2)
-        .with_max_prediction_window(20)
-        .add_player(PlayerType::Local, (local_port - 7001).into())
-        .unwrap()
-        .add_player(
-            PlayerType::Remote(remote_addr),
-            (1 - (local_port - 7001)).into(),
-        )
-        .unwrap()
-        .start_p2p_session(socket)
-        .unwrap();
-
+        .with_max_prediction_window(20);
     // uncap fps
 
     let cb = ggez::ContextBuilder::new("pong", "Jabster28").window_mode(
