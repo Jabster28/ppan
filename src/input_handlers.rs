@@ -1,3 +1,4 @@
+use bytemuck::Zeroable;
 use ggez::{input::keyboard, Context};
 use glam::*;
 
@@ -10,17 +11,11 @@ pub trait InputHandler {
     fn is_rotating_acw(&self) -> bool;
     fn tick(&mut self, ctx: &mut Context) -> Result<(), String>;
     // add a snapshot fn that returns a readonly copy of the state of the input handler
-    fn snapshot(&self) -> CurrentInputs;
+    fn snapshot(&self) -> u8;
 }
-pub struct CurrentInputs {
-    up: bool,
-    down: bool,
-    left: bool,
-    right: bool,
-    rotate_cw: bool,
-    rotate_acw: bool,
-}
-#[derive(Clone)]
+
+#[repr(C)]
+#[derive(bytemuck::Pod, Copy, Clone, Zeroable)]
 pub struct EmptyInputHandler {}
 
 impl InputHandler for EmptyInputHandler {
@@ -51,15 +46,8 @@ impl InputHandler for EmptyInputHandler {
     fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
         Ok(())
     }
-    fn snapshot(&self) -> CurrentInputs {
-        CurrentInputs {
-            up: false,
-            down: false,
-            left: false,
-            right: false,
-            rotate_cw: false,
-            rotate_acw: false,
-        }
+    fn snapshot(&self) -> u8 {
+        0
     }
 }
 #[derive(Clone)]
@@ -139,14 +127,83 @@ impl InputHandler for KeyboardInputHandler {
         self.rotating_acw = keyboard::is_key_pressed(ctx, self.rotate_acw_key);
         Ok(())
     }
-    fn snapshot(&self) -> CurrentInputs {
-        CurrentInputs {
-            up: self.going_up,
-            down: self.going_down,
-            left: self.going_left,
-            right: self.going_right,
-            rotate_cw: self.rotating_cw,
-            rotate_acw: self.rotating_acw,
+    fn snapshot(&self) -> u8 {
+        // so each bit represents a different input
+        let results = vec![
+            self.going_up,
+            self.going_down,
+            self.going_left,
+            self.going_right,
+            self.rotating_cw,
+            self.rotating_acw,
+        ];
+        let mut snapshot: u8 = 0;
+        for (i, result) in results.iter().enumerate() {
+            if *result {
+                snapshot += 1 * 2u8.pow(i as u32);
+            }
         }
+        snapshot
+    }
+}
+pub struct NetworkInputHandler {
+    going_up: bool,
+    going_down: bool,
+    pub going_left: bool,
+    pub going_right: bool,
+    pub rotating_cw: bool,
+    pub rotating_acw: bool,
+}
+impl NetworkInputHandler {
+    pub fn new(state: u8) -> NetworkInputHandler {
+        NetworkInputHandler {
+            going_up: state % 2 == 1,
+            going_down: state % 4 / 2 == 1,
+            going_left: state % 8 / 4 == 1,
+            going_right: state % 16 / 8 == 1,
+            rotating_cw: state % 32 / 16 == 1,
+            rotating_acw: state % 64 / 32 == 1,
+        }
+    }
+}
+impl InputHandler for NetworkInputHandler {
+    fn is_up(&self) -> bool {
+        self.going_up
+    }
+    fn is_down(&self) -> bool {
+        self.going_down
+    }
+    fn is_left(&self) -> bool {
+        self.going_left
+    }
+    fn is_right(&self) -> bool {
+        self.going_right
+    }
+    fn is_rotating_cw(&self) -> bool {
+        self.rotating_cw
+    }
+    fn is_rotating_acw(&self) -> bool {
+        self.rotating_acw
+    }
+    fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
+        Ok(())
+    }
+    fn snapshot(&self) -> u8 {
+        // so each bit represents a different input
+        let results = vec![
+            self.going_up,
+            self.going_down,
+            self.going_left,
+            self.going_right,
+            self.rotating_cw,
+            self.rotating_acw,
+        ];
+        let mut snapshot: u8 = 0;
+        for (i, result) in results.iter().enumerate() {
+            if *result {
+                snapshot += 1 * 2u8.pow(i as u32);
+            }
+        }
+        snapshot
     }
 }
