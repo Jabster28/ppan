@@ -320,11 +320,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
             sess.add_local_input(handle, self.handlers[0].input_handler.snapshot())
                 .unwrap();
         }
-        if self.skipping_frames > 0 {
-            self.skipping_frames -= 1;
-            println!("Frame {} skipped: WaitRecommendation", sess.current_frame());
-            return Ok(());
-        }
 
         match sess.advance_frame() {
             Ok(requests) => {
@@ -342,6 +337,12 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         },
                         ggrs::GGRSRequest::AdvanceFrame { inputs } => {
                             println!("REQ: Advancing frame");
+                            if self.skipping_frames > 0 {
+                                self.skipping_frames -= 1;
+                                println!("Frame {} skipped: WaitRecommendation", sess.current_frame());
+                                return;
+                            };
+
                             for (i, input) in inputs.iter().enumerate() {
                                 match input.1 {
                                     ggrs::InputStatus::Predicted => {
