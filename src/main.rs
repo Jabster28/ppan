@@ -1,5 +1,10 @@
+use std::net::SocketAddr;
+use std::time::{Duration, Instant};
 use ggez_egui::egui::ProgressBar;
 use ggez_egui::{egui, EguiBackend};
+use ggrs::{
+    Config, GGRSEvent, P2PSession, PlayerType, SessionBuilder, SessionState, UdpNonBlockingSocket,
+};
 
 use derive_new::new;
 use ggez::event::{self, KeyCode};
@@ -11,23 +16,40 @@ use glam::*;
 mod input_handlers;
 use input_handlers::{InputHandler, KeyboardInputHandler};
 
+use crate::input_handlers::NetworkInputHandler;
+#[derive(Debug)]
+pub struct GGRSConfig;
+
+impl Config for GGRSConfig {
+    type Input = u8; // Copy + Clone + PartialEq + bytemuck::Pod + bytemuck::Zeroable
+    type State = TableState; // Clone
+    type Address = SocketAddr; // Clone + PartialEq + Eq + Hash
+}
 struct PpanState {
     table: TableState,
     egui: EguiBackend,
     ui: UiState,
     handlers: Vec<Handler>,
+    network_session: P2PSession<GGRSConfig>,
+    skipping_frames: u32,
+    last_update: Instant,
+    accumulator: Duration,
+    reversed_table: bool,
 }
+
 struct UiState {
     debug: DebugState,
 }
-struct TableState {
+#[derive(Clone)]
+pub struct TableState {
     paddles: Vec<Paddle>,
 }
 struct DebugState {
     show_debug: bool,
     show_playarea: bool,
 }
-#[derive(new)]
+#[derive(new, Clone)]
+
 struct Paddle {
     id: u16,
     x: f32,
@@ -88,7 +110,7 @@ struct Handler {
 // }
 
 impl PpanState {
-    fn new() -> GameResult<PpanState> {
+    fn new(sess: P2PSession<GGRSConfig>, reversed_table: bool) -> GameResult<PpanState> {
         let s = PpanState {
             table: TableState {
                 paddles: vec![
@@ -132,25 +154,48 @@ impl PpanState {
                     input_handler: Box::new(KeyboardInputHandler::new(
                         KeyCode::W,
                         KeyCode::S,
-                        KeyCode::A,
-                        KeyCode::D,
-                        KeyCode::V,
-                        KeyCode::C,
+                        // reverse L and R if the table is reversed
+                        if reversed_table {
+                            KeyCode::D
+                        } else {
+                            KeyCode::A
+                        },
+                        if reversed_table {
+                            KeyCode::A
+                        } else {
+                            KeyCode::D
+                        },
+                        if reversed_table {
+                            KeyCode::C
+                        } else {
+                            KeyCode::V
+                        },
+                        if reversed_table {
+                            KeyCode::V
+                        } else {
+                            KeyCode::C
+                        },
                     )),
                     affected_paddles: vec![0],
                 },
                 Handler {
-                    input_handler: Box::new(KeyboardInputHandler::new(
-                        KeyCode::I,
-                        KeyCode::K,
-                        KeyCode::J,
-                        KeyCode::L,
-                        KeyCode::Period,
-                        KeyCode::Comma,
-                    )),
+                    // input_handler: Box::new(KeyboardInputHandler::new(
+                    //     KeyCode::I,
+                    //     KeyCode::K,
+                    //     KeyCode::J,
+                    //     KeyCode::L,
+                    //     KeyCode::Period,
+                    //     KeyCode::Comma,
+                    // )),
+                    input_handler: Box::new(EmptyInputHandler {}),
                     affected_paddles: vec![1],
                 },
             ],
+            network_session: (sess),
+            skipping_frames: 0,
+            last_update: Instant::now(),
+            accumulator: Duration::new(0, 0),
+            reversed_table,
         };
         Ok(s)
     }
@@ -174,17 +219,55 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                 ui.add(fps);
 
                 ui.label(format!(
-                    "x: {} y: {}",
-                    self.table.paddles[0].x, self.table.paddles[0].y
+                    "p1 x: {} y: {} state: {} up: {}",
+                    self.table.paddles[0].x,
+                    self.table.paddles[0].y,
+                    self.handlers[0].input_handler.snapshot(),
+                    self.handlers[0].input_handler.is_up()
+                ));
+
+                ui.label(format!(
+                    "p2 x: {} y: {} state: {} up: {}",
+                    self.table.paddles[1].x,
+                    self.table.paddles[1].y,
+                    self.handlers[1].input_handler.snapshot(),
+                    self.handlers[1].input_handler.is_up()
                 ));
 
                 if ui.button("quit").clicked() {
                     std::process::exit(0);
                 }
-
+                let stats = self
+                    .network_session
+                    .network_stats(self.network_session.remote_player_handles()[0]);
+                match stats {
+                    Ok(stats) => {
+                        ui.label(format!(
+                            "{} kbps, send queue is {}. {}ms ping. we're around {: >2} frames {: >6}, and the other player is {: >2} frames {: >6}.",
+                            stats.kbps_sent,
+                            stats.send_queue_len,
+                            stats.ping,
+                            stats.local_frames_behind.abs(),
+                            if stats.local_frames_behind > 0 {
+                                "behind"
+                            } else {
+                                "ahead"
+                            },
+                            stats.remote_frames_behind.abs(),
+                            if stats.remote_frames_behind > 0 {
+                                "behind"
+                            } else {
+                                "ahead"
+                            },
+                        ));
+                    }
+                    Err(e) => {
+                        ui.label(format!("network stats unavailable: {}", e));
+                    },
+                }
                 ui.checkbox(&mut self.ui.debug.show_playarea, "show playarea");
 
-                ui.allocate_space(ui.available_size());
+                // ui.allocate_space(ui.available_size());
             });
 
         let rot_accel = 0.8;
@@ -194,242 +277,322 @@ impl event::EventHandler<ggez::GameError> for PpanState {
         if keyboard::is_key_pressed(_ctx, KeyCode::Q) {
             // quit the game
             println!("Quitting game!");
+            // self.network_session.disconnect_player(self.network_session.local_player_handles()[0]);
             std::process::exit(0);
         }
 
         if keyboard::is_key_pressed(_ctx, KeyCode::Backslash) {
             self.ui.debug.show_debug = true;
         }
-        let delta_time = ggez::timer::delta(_ctx).as_secs_f32();
 
-        self.handlers.iter_mut().for_each(|mut handler| {
-            // log the x of each paddle in the handler's affected paddles
-            for paddle_id in &handler.affected_paddles {
-                let paddle = &mut self.table.paddles[*paddle_id as usize];
-                handler.input_handler.tick(_ctx).unwrap();
-                // input handling
-
-                if handler.input_handler.is_right() {
-                    paddle.velocity_x += paddle.acceleration;
-                    // cap velocity to 1500
-                    if paddle.velocity_x > 1500.0 {
-                        paddle.velocity_x = 1500.0;
-                    }
-                }
-                if handler.input_handler.is_left() {
-                    paddle.velocity_x -= paddle.acceleration;
-                    // cap velocity to -1500
-                    if paddle.velocity_x < -1500.0 {
-                        paddle.velocity_x = -1500.0;
-                    }
-                }
-                if handler.input_handler.is_up() {
-                    paddle.velocity_y -= paddle.acceleration;
-                    // cap velocity to -1500
-                    if paddle.velocity_y < -1500.0 {
-                        paddle.velocity_y = -1500.0;
-                    }
-                }
-                if handler.input_handler.is_down() {
-                    paddle.velocity_y += paddle.acceleration;
-                    // cap velocity to 1500
-                    if paddle.velocity_y > 1500.0 {
-                        paddle.velocity_y = 1500.0;
-                    }
-                }
-
-                if paddle.going_acw && (paddle.rotation - paddle.next_stop).abs() < 30.0 {
-                    paddle.going_acw = false;
-                } else if paddle.going_cw && (paddle.rotation - paddle.next_stop).abs() < 30.0 {
-                    paddle.going_cw = false;
-                }
-                if paddle.going_cw && paddle.going_acw {
-                    // only keep cw
-                    paddle.going_acw = false;
-                }
-
-                if handler.input_handler.is_rotating_acw() {
-                    paddle.going_acw = true;
-                    // get next 90 degree rotation to the left
-                    paddle.next_stop = (90.0 * (paddle.rotation / 90.0).floor()) as f32;
-                    if paddle.next_stop == paddle.rotation {
-                        paddle.next_stop -= 90.0
-                    }
-                    while paddle.next_stop < 0.0 {
-                        paddle.next_stop += 360.0;
-                    }
-                    paddle.next_stop %= 360.0;
-                }
-
-                if handler.input_handler.is_rotating_cw() {
-                    paddle.going_cw = true;
-                    // get next 90 degree rotation to the right
-                    paddle.next_stop = (90.0 * (paddle.rotation / 90.0).ceil()) as f32;
-                    if paddle.next_stop == paddle.rotation {
-                        paddle.next_stop += 90.0
-                    }
-                    paddle.next_stop %= 360.0;
-                }
-
-                // calculations
-                let mut initial_velocity = 0.0;
-
-                if (paddle.next_stop - paddle.rotation).abs() > 0.5 {
-                    while paddle.rotation < 0.0 {
-                        paddle.rotation += 360.0;
-                    }
-                    paddle.rotation %= 360.0;
-
-                    // first, calculate clockwise and anticlockwise rotations
-                    let mut first_displacement = paddle.next_stop - paddle.rotation;
-                    let mut second_displacement = paddle.next_stop - paddle.rotation - 180.0;
-                    // lmk if they're both positive or negative
-                    if (first_displacement > 0.0 && second_displacement > 0.0)
-                        || (first_displacement < 0.0 && second_displacement < 0.0)
-                    {
-                        println!("woah there, that's a lot of rotation");
-                    }
-                    // if our current rotation is greater than the next stop, we need to add 360 to both displacements
-                    if first_displacement < 0.0 && second_displacement < 0.0 {
-                        while first_displacement < 0.0 && second_displacement < 0.0 {
-                            first_displacement += 180.0;
-                            second_displacement += 180.0;
-                        }
-                    }
-                    if first_displacement > 0.0 && second_displacement > 0.0 {
-                        while first_displacement > 0.0 && second_displacement > 0.0 {
-                            first_displacement -= 180.0;
-                            second_displacement -= 180.0;
-                        }
-                    }
-                    // cw will always be positive, acw will always be negative
-
-                    //  if the paddle's attempted rotation is left, its rotational velocity should decrease as it reaches the next 90 degree mark
-                    // we'll use v^2 = u^2 + 2as to figure out the "initial" velocity, since we know the final velocity is 0 and acceleration is 10, and the displacement is just the rotation's distance from the nearest 90 degree mark
-                    // we'll calculate two velocities, one for the rotation to the left and one for the rotation to the right
-                    // and we'll use the one that is shortest
-                    let initial_velocity_squared_first =
-                        -(0.0 - 2.0 * rot_accel * first_displacement) % 360.0;
-                    let initial_velocity_squared_second =
-                        -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
-
-                    // if they're both positive, something went wrong. log
-                    if initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0
-                    {
-                        println!("the fuck?");
-                    }
-
-                    let init_vel_sq_cw =
-                        if initial_velocity_squared_first > initial_velocity_squared_second {
-                            initial_velocity_squared_first
-                        } else {
-                            initial_velocity_squared_second
-                        };
-                    let init_vel_sq_acw =
-                        if initial_velocity_squared_first > initial_velocity_squared_second {
-                            initial_velocity_squared_second
-                        } else {
-                            initial_velocity_squared_first
-                        };
-                    println!(
-            "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going anticlockwise, we'd need a velocity of {:?}",
-            init_vel_sq_cw.sqrt(),
-            -(init_vel_sq_acw.abs().sqrt()),
-        );
-                    // check nan
-                    if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
-                        println!("one of the velocities is nan");
-                    }
-                    let initial_velocity_squared = if paddle.going_acw {
-                        println!("we need to go left, so we're using anticlockwise");
-                        init_vel_sq_acw
-                    } else if paddle.going_cw {
-                        println!("we need to go right, so we're using clockwise");
-                        init_vel_sq_cw
-                    } else {
-                        // use the shortest one
-                        println!("we're not aiming anywhere, so we're using the shortest one");
-                        if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
-                            println!("using clockwise, {:?}", init_vel_sq_cw);
-                            init_vel_sq_cw
-                        } else {
-                            println!("using anticlockwise, {:?}", init_vel_sq_acw);
-                            init_vel_sq_acw
-                        }
-                    };
-
-                    initial_velocity = if initial_velocity_squared < 0.0 {
-                        -(initial_velocity_squared.abs().sqrt())
-                    } else {
-                        initial_velocity_squared.sqrt()
-                    };
-                } else {
-                    // if we're really close, just silently snap to the next stop
-                    // should save us a couple cpu cycles
-                    paddle.rotation = paddle.next_stop;
-                }
-                // println!("initial_velocity: {}", initial_velocity);
-                paddle.rotation_velocity = initial_velocity;
-
-                // cap rotation velocity
-                let max_rotation_velocity = 8.0;
-
-                if handler.input_handler.is_rotating_cw() {
-                    paddle.rotation_velocity += max_rotation_velocity;
-                }
-                if handler.input_handler.is_rotating_acw() {
-                    paddle.rotation_velocity -= max_rotation_velocity;
-                }
-
-                if paddle.rotation_velocity > max_rotation_velocity {
-                    paddle.rotation_velocity = max_rotation_velocity;
-                } else if paddle.rotation_velocity < -max_rotation_velocity {
-                    paddle.rotation_velocity = -max_rotation_velocity;
-                }
-
-                paddle.rotation += paddle.rotation_velocity;
-
-                // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
-                // println!(
-                //     "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
-                //     // pad start to 3 chars
-                //     paddle.x.round(),
-                //     paddle.y.round(),
-                //     paddle.going_acw,
-                //     paddle.going_cw,
-                //     paddle.rotation.round(),
-                //     paddle.rotation_velocity.round(),
-                //     paddle.next_stop.round(),
-                //     ggez::timer::fps(_ctx).round()
-                // );!!
-
-                // speed calculations
-                paddle.x += paddle.velocity_x * delta_time;
-                paddle.velocity_x *= 1.0 - paddle.friction;
-
-                paddle.y += paddle.velocity_y * delta_time;
-                paddle.velocity_y *= 1.0 - paddle.friction;
-
-                // ensure x is in bounds, and reset velocity if it is
-                if paddle.x < paddle.width / 2.0 {
-                    paddle.x = paddle.width / 2.0;
-                    paddle.velocity_x = 0.0;
-                } else if paddle.x > 800.0 - paddle.width / 2.0 {
-                    paddle.x = 800.0 - paddle.width / 2.0;
-                    paddle.velocity_x = 0.0;
-                }
-                // 0 > y > 600
-                if paddle.y < 0.0 {
-                    paddle.y = 0.0;
-                    paddle.velocity_y = 0.0;
-                } else if paddle.y > 600.0 {
-                    paddle.y = 600.0;
-                    paddle.velocity_y = 0.0;
-                }
+        // let mut delta_time = ggez::timer::delta(_ctx).as_secs_f32();
+        let sess = &mut self.network_session;
+        sess.poll_remote_clients();
+        // if sess.frames_ahead() > 0 {
+        //     delta_time *= 1.1;
+        // }
+        // print GGRS events
+        for event in sess.events() {
+            if let GGRSEvent::WaitRecommendation { skip_frames } = event {
+                self.skipping_frames += skip_frames
             }
-            // }
-        });
+            println!("Event: {:?}", event);
+        }
 
+        // this is to keep ticks between clients synchronized.
+        // if a client is ahead, it will run frames slightly slower to allow catching up
+        let delta_time = 1. / 60.0;
+        // if sess.frames_ahead() > 0 {
+        //     delta_time *= 1.1;
+        // }
+
+        // get delta time from last iteration and accumulate it
+        let delta = Instant::now().duration_since(self.last_update);
+        self.accumulator = self.accumulator.saturating_add(delta);
+        self.last_update = Instant::now();
+
+        if sess.current_state() != SessionState::Running {
+            return Ok(());
+        }
+
+        for handle in sess.local_player_handles() {
+            self.handlers[0].input_handler.tick(_ctx).unwrap();
+            sess.add_local_input(handle, self.handlers[0].input_handler.snapshot())
+                .unwrap();
+        }
+        if self.skipping_frames > 0 {
+            self.skipping_frames -= 1;
+            println!("Frame {} skipped: WaitRecommendation", sess.current_frame());
+            return Ok(());
+        }
+
+        match sess.advance_frame() {
+            Ok(requests) => {
+                println!("Request size: {:?}", requests.len());
+                requests.iter().for_each(|req| {
+                    match req {
+                        ggrs::GGRSRequest::LoadGameState { cell, frame } => {
+                            println!("REQ: Loading frame {}", frame);
+                            self.table = cell.load().unwrap();
+                        }
+                        ggrs::GGRSRequest::SaveGameState { cell, frame } =>
+                        {
+                            println!("REQ: Saving frame {}", frame);
+                            cell.save(*frame, Some(self.table.clone()), None);
+                        },
+                        ggrs::GGRSRequest::AdvanceFrame { inputs } => {
+                            println!("REQ: Advancing frame");
+                            for (i, input) in inputs.iter().enumerate() {
+                                match input.1 {
+                                    ggrs::InputStatus::Predicted => {
+                                        println!("status: predicted input on frame {} for player {}", sess.current_frame(), i);
+                                    },
+                                    ggrs::InputStatus::Disconnected => {
+                                        println!("status: disconnected input on frame {} for player {}", sess.current_frame(), i);
+                                    }
+                                    ggrs::InputStatus::Confirmed => {
+                                        println!("status: confirmed input on frame {} for player {}", sess.current_frame(), i);
+                                    },
+                                }
+                                let mut handler = NetworkInputHandler::new(input.0);
+                                // if i == 1 {
+                                //     // swap the left and right values for the second player
+                                //     (handler.going_left, handler.going_right) =
+                                //         (handler.going_right, handler.going_left);
+                                //     (handler.rotating_acw, handler.rotating_cw) =
+                                //         (handler.rotating_cw, handler.rotating_acw);
+                                // }
+
+                                //find paddle where id is i
+                                let paddle = &mut self.table.paddles.iter_mut().find(|p| p.id as usize == i).unwrap();
+                                handler.tick(_ctx).unwrap();
+                                // input handling
+
+                                if handler.is_right() {
+                                    paddle.velocity_x += paddle.acceleration;
+                                    // cap velocity to 1500
+                                    if paddle.velocity_x > 1500.0 {
+                                        paddle.velocity_x = 1500.0;
+                                    }
+                                }
+                                if handler.is_left() {
+                                    paddle.velocity_x -= paddle.acceleration;
+                                    // cap velocity to -1500
+                                    if paddle.velocity_x < -1500.0 {
+                                        paddle.velocity_x = -1500.0;
+                                    }
+                                }
+                                if handler.is_up() {
+                                    paddle.velocity_y -= paddle.acceleration;
+                                    // cap velocity to -1500
+                                    if paddle.velocity_y < -1500.0 {
+                                        paddle.velocity_y = -1500.0;
+                                    }
+                                }
+                                if handler.is_down() {
+                                    paddle.velocity_y += paddle.acceleration;
+                                    // cap velocity to 1500
+                                    if paddle.velocity_y > 1500.0 {
+                                        paddle.velocity_y = 1500.0;
+                                    }
+                                }
+
+                                if paddle.going_acw && (paddle.rotation - paddle.next_stop).abs() < 30.0 {
+                                    paddle.going_acw = false;
+                                } else if paddle.going_cw && (paddle.rotation - paddle.next_stop).abs() < 30.0 {
+                                    paddle.going_cw = false;
+                                }
+                                if paddle.going_cw && paddle.going_acw {
+                                    // only keep cw
+                                    paddle.going_acw = false;
+                                }
+
+                                if handler.is_rotating_acw() {
+                                    paddle.going_acw = true;
+                                    // get next 90 degree rotation to the left
+                                    paddle.next_stop = (90.0 * (paddle.rotation / 90.0).floor()) as f32;
+                                    if paddle.next_stop == paddle.rotation {
+                                        paddle.next_stop -= 90.0
+                                    }
+                                    while paddle.next_stop < 0.0 {
+                                        paddle.next_stop += 360.0;
+                                    }
+                                    paddle.next_stop %= 360.0;
+                                }
+
+                                if handler.is_rotating_cw() {
+                                    paddle.going_cw = true;
+                                    // get next 90 degree rotation to the right
+                                    paddle.next_stop = (90.0 * (paddle.rotation / 90.0).ceil()) as f32;
+                                    if paddle.next_stop == paddle.rotation {
+                                        paddle.next_stop += 90.0
+                                    }
+                                    paddle.next_stop %= 360.0;
+                                }
+
+                                // calculations
+                                let mut initial_velocity = 0.0;
+
+                                if (paddle.next_stop - paddle.rotation).abs() > 0.5 {
+                                    while paddle.rotation < 0.0 {
+                                        paddle.rotation += 360.0;
+                                    }
+                                    paddle.rotation %= 360.0;
+
+                                    // first, calculate clockwise and anticlockwise rotations
+                                    let mut first_displacement = paddle.next_stop - paddle.rotation;
+                                    let mut second_displacement = paddle.next_stop - paddle.rotation - 180.0;
+                                    // lmk if they're both positive or negative
+                                    if (first_displacement > 0.0 && second_displacement > 0.0)
+                                        || (first_displacement < 0.0 && second_displacement < 0.0)
+                                    {
+                                        println!("woah there, that's a lot of rotation");
+                                    }
+                                    // if our current rotation is greater than the next stop, we need to add 360 to both displacements
+                                    if first_displacement < 0.0 && second_displacement < 0.0 {
+                                        while first_displacement < 0.0 && second_displacement < 0.0 {
+                                            first_displacement += 180.0;
+                                            second_displacement += 180.0;
+                                        }
+                                    }
+                                    if first_displacement > 0.0 && second_displacement > 0.0 {
+                                        while first_displacement > 0.0 && second_displacement > 0.0 {
+                                            first_displacement -= 180.0;
+                                            second_displacement -= 180.0;
+                                        }
+                                    }
+                                    // cw will always be positive, acw will always be negative
+
+                                    //  if the paddle's attempted rotation is left, its rotational velocity should decrease as it reaches the next 90 degree mark
+                                    // we'll use v^2 = u^2 + 2as to figure out the "initial" velocity, since we know the final velocity is 0 and acceleration is 10, and the displacement is just the rotation's distance from the nearest 90 degree mark
+                                    // we'll calculate two velocities, one for the rotation to the left and one for the rotation to the right
+                                    // and we'll use the one that is shortest
+                                    let initial_velocity_squared_first =
+                                        -(0.0 - 2.0 * rot_accel * first_displacement) % 360.0;
+                                    let initial_velocity_squared_second =
+                                        -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
+
+                                    // if they're both positive, something went wrong. log
+                                    if initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0
+                                    {
+                                        println!("the fuck?");
+                                    }
+
+                                    let init_vel_sq_cw =
+                                        if initial_velocity_squared_first > initial_velocity_squared_second {
+                                            initial_velocity_squared_first
+                                        } else {
+                                            initial_velocity_squared_second
+                                        };
+                                    let init_vel_sq_acw =
+                                        if initial_velocity_squared_first > initial_velocity_squared_second {
+                                            initial_velocity_squared_second
+                                        } else {
+                                            initial_velocity_squared_first
+                                        };
+                                    println!(
+                                        "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going anticlockwise, we'd need a velocity of {:?}",
+                                        init_vel_sq_cw.sqrt(),
+                                        -(init_vel_sq_acw.abs().sqrt()),
+                                    );
+                                    // check nan
+                                    if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
+                                        println!("one of the velocities is nan");
+                                    }
+                                    let initial_velocity_squared = if paddle.going_acw {
+                                        println!("we need to go left, so we're using anticlockwise");
+                                        init_vel_sq_acw
+                                    } else if paddle.going_cw {
+                                        println!("we need to go right, so we're using clockwise");
+                                        init_vel_sq_cw
+                                    } else {
+                                        // use the shortest one
+                                        println!("we're not aiming anywhere, so we're using the shortest one");
+                                        if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
+                                            println!("using clockwise, {:?}", init_vel_sq_cw);
+                                            init_vel_sq_cw
+                                        } else {
+                                            println!("using anticlockwise, {:?}", init_vel_sq_acw);
+                                            init_vel_sq_acw
+                                        }
+                                    };
+
+                                    initial_velocity = if initial_velocity_squared < 0.0 {
+                                        -(initial_velocity_squared.abs().sqrt())
+                                    } else {
+                                        initial_velocity_squared.sqrt()
+                                    };
+                                } else {
+                                    // if we're really close, just silently snap to the next stop
+                                    // should save us a couple cpu cycles
+                                    paddle.rotation = paddle.next_stop;
+                                }
+                                // println!("initial_velocity: {}", initial_velocity);
+                                paddle.rotation_velocity = initial_velocity;
+
+                                // cap rotation velocity
+                                let max_rotation_velocity = 8.0;
+
+                                if handler.is_rotating_cw() {
+                                    paddle.rotation_velocity += max_rotation_velocity;
+                                }
+                                if handler.is_rotating_acw() {
+                                    paddle.rotation_velocity -= max_rotation_velocity;
+                                }
+
+                                if paddle.rotation_velocity > max_rotation_velocity {
+                                    paddle.rotation_velocity = max_rotation_velocity;
+                                } else if paddle.rotation_velocity < -max_rotation_velocity {
+                                    paddle.rotation_velocity = -max_rotation_velocity;
+                                }
+
+                                paddle.rotation += paddle.rotation_velocity;
+
+                                // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
+                                // println!(
+                                //     "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
+                                //     // pad start to 3 chars
+                                //     paddle.x.round(),
+                                //     paddle.y.round(),
+                                //     paddle.going_acw,
+                                //     paddle.going_cw,
+                                //     paddle.rotation.round(),
+                                //     paddle.rotation_velocity.round(),
+                                //     paddle.next_stop.round(),
+                                //     ggez::timer::fps(_ctx).round()
+                                // );!!
+
+                                // speed calculations
+                                paddle.x += paddle.velocity_x * delta_time;
+                                paddle.velocity_x *= 1.0 - paddle.friction;
+
+                                paddle.y += paddle.velocity_y * delta_time;
+                                paddle.velocity_y *= 1.0 - paddle.friction;
+
+                                // ensure x is in bounds, and reset velocity if it is
+                                if paddle.x < paddle.width / 2.0 {
+                                    paddle.x = paddle.width / 2.0;
+                                    paddle.velocity_x = 0.0;
+                                } else if paddle.x > 800.0 - paddle.width / 2.0 {
+                                    paddle.x = 800.0 - paddle.width / 2.0;
+                                    paddle.velocity_x = 0.0;
+                                }
+                                // 0 > y > 600
+                                if paddle.y < 0.0 {
+                                    paddle.y = 0.0;
+                                    paddle.velocity_y = 0.0;
+                                } else if paddle.y > 600.0 {
+                                    paddle.y = 600.0;
+                                    paddle.velocity_y = 0.0;
+                                }
+                            }
+                        }
+                    }
+                });
+                ()
+            }
+            Err(e) => panic!("{:?}", e),
+        }
         // calculate delta time, but factor in the framerate
 
         // for loop with both left and right paddles
@@ -494,6 +657,12 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
         // step 3: draw paddles
         for paddle in paddles {
+            let mut paddle = paddle.clone();
+            if self.reversed_table {
+                // reverse the paddle's x values and rotation
+                paddle.x = 800.0 - paddle.x;
+                paddle.rotation = 360.0 - paddle.rotation;
+            }
             let rectangle = Rect {
                 x: 0.0,
                 y: 0.0,
@@ -568,6 +737,27 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 }
 
 fn main() -> GameResult {
+    let mut local_port = 7001;
+    let mut remote_addr: SocketAddr = "127.0.0.1:7002".parse().unwrap();
+    let socket = UdpNonBlockingSocket::bind_to_port(local_port).unwrap_or_else(|_| {
+        println!("Port {} taken, trying next port", local_port);
+        local_port += 1;
+        remote_addr = "127.0.0.1:7001".parse().unwrap();
+        UdpNonBlockingSocket::bind_to_port(local_port).unwrap()
+    });
+    let mut sess = SessionBuilder::<GGRSConfig>::new()
+        .with_num_players(2)
+        .with_max_prediction_window(20)
+        .add_player(PlayerType::Local, (local_port - 7001).into())
+        .unwrap()
+        .add_player(
+            PlayerType::Remote(remote_addr),
+            (1 - (local_port - 7001)).into(),
+        )
+        .unwrap()
+        .start_p2p_session(socket)
+        .unwrap();
+
     // uncap fps
 
     let cb = ggez::ContextBuilder::new("pong", "Jabster28").window_mode(
@@ -580,7 +770,7 @@ fn main() -> GameResult {
     // set fullscreen
     ggez::graphics::set_fullscreen(&mut ctx, ggez::conf::FullscreenType::Windowed)?;
 
-    let state: PpanState = PpanState::new()?;
+    let state: PpanState = PpanState::new(sess, local_port == 7002)?;
 
     event::run(ctx, event_loop, state)
 }
