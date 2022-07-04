@@ -1,5 +1,5 @@
 #![feature(unboxed_closures)]
-use ggez_egui::egui::{ProgressBar, Slider};
+use ggez_egui::egui::ProgressBar;
 use ggez_egui::{egui, EguiBackend};
 
 use derive_new::new;
@@ -10,7 +10,7 @@ use ggez::input::keyboard;
 use ggez::{Context, GameResult};
 use glam::*;
 mod input_handlers;
-use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
+use input_handlers::{InputHandler, KeyboardInputHandler};
 
 struct GameState {
     left_paddles: Vec<Paddle>,
@@ -247,12 +247,6 @@ impl event::EventHandler<ggez::GameError> for GameState {
                 // first, calculate clockwise and anticlockwise rotations
                 let mut first_displacement = paddle.next_stop - paddle.rotation;
                 let mut second_displacement = paddle.next_stop - paddle.rotation - 180.0;
-                // lmk if they're both positive or negative
-                if (first_displacement > 0.0 && second_displacement > 0.0)
-                    || (first_displacement < 0.0 && second_displacement < 0.0)
-                {
-                    println!("woah there, that's a lot of rotation");
-                }
                 // if our current rotation is greater than the next stop, we need to add 360 to both displacements
                 if first_displacement < 0.0 && second_displacement < 0.0 {
                     while first_displacement < 0.0 && second_displacement < 0.0 {
@@ -277,11 +271,6 @@ impl event::EventHandler<ggez::GameError> for GameState {
                 let initial_velocity_squared_second =
                     -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
 
-                // if they're both positive, something went wrong. log
-                if initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0 {
-                    println!("the fuck?");
-                }
-
                 let init_vel_sq_cw =
                     if initial_velocity_squared_first > initial_velocity_squared_second {
                         initial_velocity_squared_first
@@ -294,29 +283,15 @@ impl event::EventHandler<ggez::GameError> for GameState {
                     } else {
                         initial_velocity_squared_first
                     };
-                println!(
-            "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going anticlockwise, we'd need a velocity of {:?}",
-            init_vel_sq_cw.sqrt(),
-            -(init_vel_sq_acw.abs().sqrt()),
-        );
-                // check nan
-                if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
-                    println!("one of the velocities is nan");
-                }
                 let initial_velocity_squared = if paddle.going_acw {
-                    println!("we need to go left, so we're using anticlockwise");
                     init_vel_sq_acw
                 } else if paddle.going_cw {
-                    println!("we need to go right, so we're using clockwise");
                     init_vel_sq_cw
                 } else {
                     // use the shortest one
-                    println!("we're not aiming anywhere, so we're using the shortest one");
                     if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
-                        println!("using clockwise, {:?}", init_vel_sq_cw);
                         init_vel_sq_cw
                     } else {
-                        println!("using anticlockwise, {:?}", init_vel_sq_acw);
                         init_vel_sq_acw
                     }
                 };
@@ -442,9 +417,9 @@ impl event::EventHandler<ggez::GameError> for GameState {
                 playarearect,
                 // need to convert [0.1, 0.2, 0.3, 1.0] into ints by * by 255
                 Color::from_rgba(
-                    (0.1 as f32 * 255.0 as f32).round() as u8,
-                    (0.2 as f32 * 255.0 as f32).round() as u8,
-                    (0.3 as f32 * 255.0 as f32).round() as u8,
+                    (0.1_f32 * 255.0_f32).round() as u8,
+                    (0.2_f32 * 255.0_f32).round() as u8,
+                    (0.3_f32 * 255.0_f32).round() as u8,
                     255,
                 ),
             )?;
