@@ -301,20 +301,21 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         txt: "me".to_string(),
                     });
                 } if ui.button("start").clicked() {
-                    self.players.iter_mut().enumerate().for_each(|(i, player)| {
-                        self.sess_builder = self.sess_builder.add_player(
-                            match player.addr {
-                                PlayerType::Local => 
-                                    PlayerType::Local,
-                                PlayerType::Remote(addr) => 
-                                    PlayerType::Remote(addr),
-                                PlayerType::Spectator(addr) => 
-                                    PlayerType::Spectator(addr),
-                            },
-                            i
-                        ).unwrap();
-                    });
-                    // self.network_session = Some(2);
+                    // TODO: figure out a way to mess with ownership so that this works
+                    // self.players.iter_mut().enumerate().for_each(|(i, player)| {
+                    //     self.sess_builder = self.sess_builder.add_player(
+                    //         match player.addr {
+                    //             PlayerType::Local => 
+                    //                 PlayerType::Local,
+                    //             PlayerType::Remote(addr) => 
+                    //                 PlayerType::Remote(addr),
+                    //             PlayerType::Spectator(addr) => 
+                    //                 PlayerType::Spectator(addr),
+                    //         },
+                    //         i
+                    //     ).unwrap();
+                    // });
+                    // // self.network_session = Some(2);
                 }
             }
 
