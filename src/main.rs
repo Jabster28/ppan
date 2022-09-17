@@ -14,7 +14,7 @@ use ggez::input::keyboard;
 use ggez::{Context, GameResult};
 use glam::*;
 mod input_handlers;
-use input_handlers::{InputHandler, KeyboardInputHandler};
+use input_handlers::{InputHandler, KeyboardInputHandler, EmptyInputHandler};
 
 use crate::input_handlers::NetworkInputHandler;
 #[derive(Debug)]
