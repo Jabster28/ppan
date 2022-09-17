@@ -46,6 +46,7 @@ impl InputHandler for EmptyInputHandler {
     fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
         Ok(())
     }
+
     fn snapshot(&self) -> u8 {
         0
     }
@@ -127,6 +128,7 @@ impl InputHandler for KeyboardInputHandler {
         self.rotating_acw = keyboard::is_key_pressed(ctx, self.rotate_acw_key);
         Ok(())
     }
+
     fn snapshot(&self) -> u8 {
         // so each bit represents a different input
         let results = vec![
@@ -170,24 +172,31 @@ impl InputHandler for NetworkInputHandler {
     fn is_up(&self) -> bool {
         self.going_up
     }
+
     fn is_down(&self) -> bool {
         self.going_down
     }
+
     fn is_left(&self) -> bool {
         self.going_left
     }
+
     fn is_right(&self) -> bool {
         self.going_right
     }
+
     fn is_rotating_cw(&self) -> bool {
         self.rotating_cw
     }
+
     fn is_rotating_acw(&self) -> bool {
         self.rotating_acw
     }
+
     fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
         Ok(())
     }
+
     fn snapshot(&self) -> u8 {
         // so each bit represents a different input
         let results = vec![
