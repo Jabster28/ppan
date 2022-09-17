@@ -17,21 +17,27 @@ impl InputHandler for EmptyInputHandler {
     fn is_up(&self) -> bool {
         false
     }
+
     fn is_down(&self) -> bool {
         false
     }
+
     fn is_left(&self) -> bool {
         false
     }
+
     fn is_right(&self) -> bool {
         false
     }
+
     fn is_rotating_cw(&self) -> bool {
         false
     }
+
     fn is_rotating_acw(&self) -> bool {
         false
     }
+
     fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
         Ok(())
     }
@@ -83,21 +89,27 @@ impl InputHandler for KeyboardInputHandler {
     fn is_up(&self) -> bool {
         self.going_up
     }
+
     fn is_down(&self) -> bool {
         self.going_down
     }
+
     fn is_left(&self) -> bool {
         self.going_left
     }
+
     fn is_right(&self) -> bool {
         self.going_right
     }
+
     fn is_rotating_cw(&self) -> bool {
         self.rotating_cw
     }
+
     fn is_rotating_acw(&self) -> bool {
         self.rotating_acw
     }
+
     fn tick(&mut self, ctx: &mut Context) -> Result<(), String> {
         self.going_up = keyboard::is_key_pressed(ctx, self.up_key);
         self.going_down = keyboard::is_key_pressed(ctx, self.down_key);

@@ -1,0 +1,8 @@
+reorder_imports = true
+hard_tabs = false
+format_code_in_doc_comments = true
+format_strings = true
+imports_layout = "HorizontalVertical"
+normalize_comments = true
+normalize_doc_attributes = true
+reorder_impl_items = true
