@@ -1,9 +1,16 @@
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use ggez_egui::egui::ProgressBar;
+
 use ggez_egui::{egui, EguiBackend};
 use ggrs::{
-    Config, GGRSEvent, P2PSession, PlayerType, SessionBuilder, SessionState, UdpNonBlockingSocket,
+    Config,
+    GGRSEvent,
+    P2PSession,
+    PlayerType,
+    SessionBuilder,
+    SessionState,
+    UdpNonBlockingSocket,
 };
 
 use derive_new::new;
@@ -14,16 +21,18 @@ use ggez::input::keyboard;
 use ggez::{Context, GameResult};
 use glam::*;
 mod input_handlers;
-use input_handlers::{InputHandler, KeyboardInputHandler, EmptyInputHandler};
+use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
 
 use crate::input_handlers::NetworkInputHandler;
 #[derive(Debug)]
 pub struct GGRSConfig;
 
 impl Config for GGRSConfig {
-    type Input = u8; // Copy + Clone + PartialEq + bytemuck::Pod + bytemuck::Zeroable
-    type State = TableState; // Clone
-    type Address = SocketAddr; // Clone + PartialEq + Eq + Hash
+    // Clone
+    type Address = SocketAddr;
+    type Input = u8;
+    // Copy + Clone + PartialEq + bytemuck::Pod + bytemuck::Zeroable
+    type State = TableState; // Clone + PartialEq + Eq + Hash
 }
 
 struct Player {
@@ -122,30 +131,26 @@ impl PpanState {
             table: TableState {
                 paddles: vec![
                     Paddle::new(
-                        0,
-                        40.0,
-                        true
-                        // Box::new(KeyboardInputHandler::new(
-                        //     KeyCode::W,
-                        //     KeyCode::S,
-                        //     KeyCode::A,
-                        //     KeyCode::D,
-                        //     KeyCode::V,
-                        //     KeyCode::C,
-                        // )),
+                        0, 40.0,
+                        true, /* Box::new(KeyboardInputHandler::new(
+                              *     KeyCode::W,
+                              *     KeyCode::S,
+                              *     KeyCode::A,
+                              *     KeyCode::D,
+                              *     KeyCode::V,
+                              *     KeyCode::C,
+                              * )), */
                     ),
                     Paddle::new(
-                        1,
-                        760.0,
-                        false
-                        // Box::new(KeyboardInputHandler::new(
-                        //     KeyCode::I,
-                        //     KeyCode::K,
-                        //     KeyCode::J,
-                        //     KeyCode::L,
-                        //     KeyCode::Period,
-                        //     KeyCode::Comma,
-                        // )),
+                        1, 760.0,
+                        false, /* Box::new(KeyboardInputHandler::new(
+                               *     KeyCode::I,
+                               *     KeyCode::K,
+                               *     KeyCode::J,
+                               *     KeyCode::L,
+                               *     KeyCode::Period,
+                               *     KeyCode::Comma,
+                               * )), */
                     ),
                 ],
             },
@@ -241,117 +246,114 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     self.handlers[1].input_handler.snapshot(),
                     self.handlers[1].input_handler.is_up()
                 ));
-                        ui.end_row();
-                if self.network_session.is_none()
-            {
-
-                for player in self.players.iter_mut() {
-                    ui.label(format!(
-                        "player type: {}",
-                        match player.addr {
-                            PlayerType::Local => 
-                                "local",
-                            PlayerType::Remote(_) => 
-                                "remote",
-                            PlayerType::Spectator(_) => 
-                                "spectator",
-                        },
-                        // match player.addr {
-                        //     PlayerType::Local => 
-                        //         "localhost".to_string(),
-                        //     PlayerType::Remote(addr) => 
-                        //         addr.to_string(),
-                        //     PlayerType::Spectator(addr) => 
-                        //         addr.to_string(),
-                        // }
-                    ));
-                    let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
+                ui.end_row();
+                if self.network_session.is_none() {
+                    for player in self.players.iter_mut() {
+                        ui.label(format!(
+                            "player type: {}",
+                            match player.addr {
+                                PlayerType::Local => "local",
+                                PlayerType::Remote(_) => "remote",
+                                PlayerType::Spectator(_) => "spectator",
+                            },
+                            // match player.addr {
+                            //     PlayerType::Local =>
+                            //         "localhost".to_string(),
+                            //     PlayerType::Remote(addr) =>
+                            //         addr.to_string(),
+                            //     PlayerType::Spectator(addr) =>
+                            //         addr.to_string(),
+                            // }
+                        ));
+                        let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
                         if (response).changed() {
                             println!("maybe i should write rn");
                             println!("{}", player.txt);
                         }
-                        if (response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) ) {
-                        let socketaddr: Option<SocketAddr> = match player.txt.parse() {
-                            Ok(addr) => Some(addr),
-                            Err(_) => None,
-                        };
-
-                        if socketaddr.is_none() {
-                            println!("invalid address");
-                            player.txt = match player.addr {
-                                PlayerType::Local => 
-                                    "me".to_string(),
-                                PlayerType::Remote(addr) => 
-                                    addr.to_string(),
-                                PlayerType::Spectator(addr) => 
-                                    addr.to_string(),
+                        if (response.lost_focus() && ui.input().key_pressed(egui::Key::Enter)) {
+                            let socketaddr: Option<SocketAddr> = match player.txt.parse() {
+                                Ok(addr) => Some(addr),
+                                Err(_) => None,
                             };
-                            return;
-                        } else {
-                            println!("new address: {}", socketaddr.unwrap());
-                            player.addr = PlayerType::Remote(socketaddr.unwrap());
-                        }
-                    }
-        ui.end_row();
-                }
 
-                if ui.button("add player").clicked() {
-                    self.players.push(Player {
-                        addr: PlayerType::Local,
-                        txt: "me".to_string(),
-                    });
-                } if ui.button("start").clicked() {
-                    // TODO: figure out a way to mess with ownership so that this works
-                    // self.players.iter_mut().enumerate().for_each(|(i, player)| {
-                    //     self.sess_builder = self.sess_builder.add_player(
-                    //         match player.addr {
-                    //             PlayerType::Local => 
-                    //                 PlayerType::Local,
-                    //             PlayerType::Remote(addr) => 
-                    //                 PlayerType::Remote(addr),
-                    //             PlayerType::Spectator(addr) => 
-                    //                 PlayerType::Spectator(addr),
-                    //         },
-                    //         i
-                    //     ).unwrap();
-                    // });
-                    // // self.network_session = Some(2);
+                            if socketaddr.is_none() {
+                                println!("invalid address");
+                                player.txt = match player.addr {
+                                    PlayerType::Local => "me".to_string(),
+                                    PlayerType::Remote(addr) => addr.to_string(),
+                                    PlayerType::Spectator(addr) => addr.to_string(),
+                                };
+                                return;
+                            } else {
+                                println!("new address: {}", socketaddr.unwrap());
+                                player.addr = PlayerType::Remote(socketaddr.unwrap());
+                            }
+                        }
+                        ui.end_row();
+                    }
+
+                    if ui.button("add player").clicked() {
+                        self.players.push(Player {
+                            addr: PlayerType::Local,
+                            txt: "me".to_string(),
+                        });
+                    }
+                    if ui.button("start").clicked() {
+                        // TODO: figure out a way to mess with ownership so that this works
+                        // self.players.iter_mut().enumerate().for_each(|(i, player)| {
+                        //     self.sess_builder = self.sess_builder.add_player(
+                        //         match player.addr {
+                        //             PlayerType::Local =>
+                        //                 PlayerType::Local,
+                        //             PlayerType::Remote(addr) =>
+                        //                 PlayerType::Remote(addr),
+                        //             PlayerType::Spectator(addr) =>
+                        //                 PlayerType::Spectator(addr),
+                        //         },
+                        //         i
+                        //     ).unwrap();
+                        // });
+                        // // self.network_session = Some(2);
+                    }
                 }
-            }
 
                 if ui.button("quit").clicked() {
                     std::process::exit(0);
                 }
                 if self.network_session.is_some() {
-                let stats = self
-                    .network_session.as_ref().unwrap()
-                    .network_stats(self.network_session.as_ref().unwrap().remote_player_handles()[0]);
-                match stats {
-                    Ok(stats) => {
-                        ui.label(format!(
-                            "{} kbps, send queue is {}. {}ms ping. we're around {: >2} frames {: >6}, and the other player is {: >2} frames {: >6}.",
-                            stats.kbps_sent,
-                            stats.send_queue_len,
-                            stats.ping,
-                            stats.local_frames_behind.abs(),
-                            if stats.local_frames_behind > 0 {
-                                "behind"
-                            } else {
-                                "ahead"
-                            },
-                            stats.remote_frames_behind.abs(),
-                            if stats.remote_frames_behind > 0 {
-                                "behind"
-                            } else {
-                                "ahead"
-                            },
-                        ));
+                    let stats = self.network_session.as_ref().unwrap().network_stats(
+                        self.network_session
+                            .as_ref()
+                            .unwrap()
+                            .remote_player_handles()[0],
+                    );
+                    match stats {
+                        Ok(stats) => {
+                            ui.label(format!(
+                                "{} kbps, send queue is {}. {}ms ping. we're around {: >2} frames \
+                                 {: >6}, and the other player is {: >2} frames {: >6}.",
+                                stats.kbps_sent,
+                                stats.send_queue_len,
+                                stats.ping,
+                                stats.local_frames_behind.abs(),
+                                if stats.local_frames_behind > 0 {
+                                    "behind"
+                                } else {
+                                    "ahead"
+                                },
+                                stats.remote_frames_behind.abs(),
+                                if stats.remote_frames_behind > 0 {
+                                    "behind"
+                                } else {
+                                    "ahead"
+                                },
+                            ));
+                        }
+                        Err(e) => {
+                            ui.label(format!("network stats unavailable: {}", e));
+                        }
                     }
-                    Err(e) => {
-                        ui.label(format!("network stats unavailable: {}", e));
-                    },
-                }
-                         } else {
+                } else {
                     ui.label("no network session active");
                 }
                 ui.checkbox(&mut self.ui.debug.show_playarea, "show playarea");
@@ -422,30 +424,44 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                             println!("REQ: Loading frame {}", frame);
                             self.table = cell.load().unwrap();
                         }
-                        ggrs::GGRSRequest::SaveGameState { cell, frame } =>
-                        {
+                        ggrs::GGRSRequest::SaveGameState { cell, frame } => {
                             println!("REQ: Saving frame {}", frame);
                             cell.save(*frame, Some(self.table.clone()), None);
-                        },
+                        }
                         ggrs::GGRSRequest::AdvanceFrame { inputs } => {
                             println!("REQ: Advancing frame");
                             if self.skipping_frames > 0 {
                                 self.skipping_frames -= 1;
-                                println!("Frame {} skipped: WaitRecommendation", sess.current_frame());
+                                println!(
+                                    "Frame {} skipped: WaitRecommendation",
+                                    sess.current_frame()
+                                );
                                 return;
                             };
 
                             for (i, input) in inputs.iter().enumerate() {
                                 match input.1 {
                                     ggrs::InputStatus::Predicted => {
-                                        println!("status: predicted input on frame {} for player {}", sess.current_frame(), i);
-                                    },
+                                        println!(
+                                            "status: predicted input on frame {} for player {}",
+                                            sess.current_frame(),
+                                            i
+                                        );
+                                    }
                                     ggrs::InputStatus::Disconnected => {
-                                        println!("status: disconnected input on frame {} for player {}", sess.current_frame(), i);
+                                        println!(
+                                            "status: disconnected input on frame {} for player {}",
+                                            sess.current_frame(),
+                                            i
+                                        );
                                     }
                                     ggrs::InputStatus::Confirmed => {
-                                        println!("status: confirmed input on frame {} for player {}", sess.current_frame(), i);
-                                    },
+                                        println!(
+                                            "status: confirmed input on frame {} for player {}",
+                                            sess.current_frame(),
+                                            i
+                                        );
+                                    }
                                 }
                                 let mut handler = NetworkInputHandler::new(input.0);
                                 // if i == 1 {
@@ -456,8 +472,13 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                 //         (handler.rotating_cw, handler.rotating_acw);
                                 // }
 
-                                //find paddle where id is i
-                                let paddle = &mut self.table.paddles.iter_mut().find(|p| p.id as usize == i).unwrap();
+                                // find paddle where id is i
+                                let paddle = &mut self
+                                    .table
+                                    .paddles
+                                    .iter_mut()
+                                    .find(|p| p.id as usize == i)
+                                    .unwrap();
                                 handler.tick(_ctx).unwrap();
                                 // input handling
 
@@ -490,9 +511,13 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                     }
                                 }
 
-                                if paddle.going_acw && (paddle.rotation - paddle.next_stop).abs() < 30.0 {
+                                if paddle.going_acw
+                                    && (paddle.rotation - paddle.next_stop).abs() < 30.0
+                                {
                                     paddle.going_acw = false;
-                                } else if paddle.going_cw && (paddle.rotation - paddle.next_stop).abs() < 30.0 {
+                                } else if paddle.going_cw
+                                    && (paddle.rotation - paddle.next_stop).abs() < 30.0
+                                {
                                     paddle.going_cw = false;
                                 }
                                 if paddle.going_cw && paddle.going_acw {
@@ -503,7 +528,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                 if handler.is_rotating_acw() {
                                     paddle.going_acw = true;
                                     // get next 90 degree rotation to the left
-                                    paddle.next_stop = (90.0 * (paddle.rotation / 90.0).floor()) as f32;
+                                    paddle.next_stop =
+                                        (90.0 * (paddle.rotation / 90.0).floor()) as f32;
                                     if paddle.next_stop == paddle.rotation {
                                         paddle.next_stop -= 90.0
                                     }
@@ -516,7 +542,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                 if handler.is_rotating_cw() {
                                     paddle.going_cw = true;
                                     // get next 90 degree rotation to the right
-                                    paddle.next_stop = (90.0 * (paddle.rotation / 90.0).ceil()) as f32;
+                                    paddle.next_stop =
+                                        (90.0 * (paddle.rotation / 90.0).ceil()) as f32;
                                     if paddle.next_stop == paddle.rotation {
                                         paddle.next_stop += 90.0
                                     }
@@ -534,7 +561,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
                                     // first, calculate clockwise and anticlockwise rotations
                                     let mut first_displacement = paddle.next_stop - paddle.rotation;
-                                    let mut second_displacement = paddle.next_stop - paddle.rotation - 180.0;
+                                    let mut second_displacement =
+                                        paddle.next_stop - paddle.rotation - 180.0;
                                     // lmk if they're both positive or negative
                                     if (first_displacement > 0.0 && second_displacement > 0.0)
                                         || (first_displacement < 0.0 && second_displacement < 0.0)
@@ -543,13 +571,15 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                     }
                                     // if our current rotation is greater than the next stop, we need to add 360 to both displacements
                                     if first_displacement < 0.0 && second_displacement < 0.0 {
-                                        while first_displacement < 0.0 && second_displacement < 0.0 {
+                                        while first_displacement < 0.0 && second_displacement < 0.0
+                                        {
                                             first_displacement += 180.0;
                                             second_displacement += 180.0;
                                         }
                                     }
                                     if first_displacement > 0.0 && second_displacement > 0.0 {
-                                        while first_displacement > 0.0 && second_displacement > 0.0 {
+                                        while first_displacement > 0.0 && second_displacement > 0.0
+                                        {
                                             first_displacement -= 180.0;
                                             second_displacement -= 180.0;
                                         }
@@ -566,41 +596,53 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                         -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
 
                                     // if they're both positive, something went wrong. log
-                                    if initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0
+                                    if initial_velocity_squared_first > 0.0
+                                        && initial_velocity_squared_second > 0.0
                                     {
                                         println!("the fuck?");
                                     }
 
-                                    let init_vel_sq_cw =
-                                        if initial_velocity_squared_first > initial_velocity_squared_second {
-                                            initial_velocity_squared_first
-                                        } else {
-                                            initial_velocity_squared_second
-                                        };
-                                    let init_vel_sq_acw =
-                                        if initial_velocity_squared_first > initial_velocity_squared_second {
-                                            initial_velocity_squared_second
-                                        } else {
-                                            initial_velocity_squared_first
-                                        };
+                                    let init_vel_sq_cw = if initial_velocity_squared_first
+                                        > initial_velocity_squared_second
+                                    {
+                                        initial_velocity_squared_first
+                                    } else {
+                                        initial_velocity_squared_second
+                                    };
+                                    let init_vel_sq_acw = if initial_velocity_squared_first
+                                        > initial_velocity_squared_second
+                                    {
+                                        initial_velocity_squared_second
+                                    } else {
+                                        initial_velocity_squared_first
+                                    };
                                     println!(
-                                        "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going anticlockwise, we'd need a velocity of {:?}",
+                                        "so if we're going clockwise, we'll need a velocity of \
+                                         {:?}, but if we're going anticlockwise, we'd need a \
+                                         velocity of {:?}",
                                         init_vel_sq_cw.sqrt(),
                                         -(init_vel_sq_acw.abs().sqrt()),
                                     );
                                     // check nan
-                                    if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
+                                    if (-init_vel_sq_acw.abs().sqrt()).is_nan()
+                                        || init_vel_sq_cw.sqrt().is_nan()
+                                    {
                                         println!("one of the velocities is nan");
                                     }
                                     let initial_velocity_squared = if paddle.going_acw {
-                                        println!("we need to go left, so we're using anticlockwise");
+                                        println!(
+                                            "we need to go left, so we're using anticlockwise"
+                                        );
                                         init_vel_sq_acw
                                     } else if paddle.going_cw {
                                         println!("we need to go right, so we're using clockwise");
                                         init_vel_sq_cw
                                     } else {
                                         // use the shortest one
-                                        println!("we're not aiming anywhere, so we're using the shortest one");
+                                        println!(
+                                            "we're not aiming anywhere, so we're using the \
+                                             shortest one"
+                                        );
                                         if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
                                             println!("using clockwise, {:?}", init_vel_sq_cw);
                                             init_vel_sq_cw
