@@ -1,6 +1,11 @@
+use std::io::prelude::*;
+use std::fs::OpenOptions;
 use std::mem::{swap, take};
 use std::net::SocketAddr;
-use std::time::{Duration, Instant};
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant, SystemTime};
+
 use ggez_egui::egui::ProgressBar;
 
 use ggez_egui::{egui, EguiBackend};
@@ -52,6 +57,7 @@ struct PpanState {
     accumulator: Duration,
     reversed_table: bool,
     players: Vec<Player>,
+    tx: mpsc::Sender<String>,
 }
 
 struct UiState {
@@ -127,7 +133,25 @@ struct Handler {
 
 impl PpanState {
     fn new(sess: SessionBuilder<GGRSConfig>, reversed_table: bool) -> GameResult<PpanState> {
+        let (tx, rx) = mpsc::channel();
+        thread::spawn(move || {
+            rx.try_recv().unwrap_or("".to_string());
+            // println!("failed + L + ratio");
+            // create ppan.log
+
+            let mut file = OpenOptions::new()
+                .write(true)
+                .append(true)
+                .create(true)
+                .open("ppan.log")
+                .unwrap();
+            loop {
+                // println!("attempting to recv");
+                writeln!(file, "{}", rx.recv().unwrap()).unwrap();
+            }
+        });
         let s = PpanState {
+            tx: tx.clone(),
             table: TableState {
                 paddles: vec![
                     Paddle::new(
@@ -217,6 +241,20 @@ impl PpanState {
 
 impl event::EventHandler<ggez::GameError> for PpanState {
     fn update(&mut self, _ctx: &mut Context) -> GameResult {
+        let log = |msg: &str| match self.tx.send(format!(
+            "{}: {}",
+            // time
+            SystemTime::now()
+                .duration_since(SystemTime::UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
+            msg
+        )) {
+            Ok(_) => {}
+            Err(e) => {
+                panic!("Error sending log message: {}", e);
+            }
+        };
         // update window size
         let (width, height) = graphics::drawable_size(_ctx);
         graphics::set_screen_coordinates(
@@ -274,7 +312,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                             // }
                         ));
                         let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
-                        if (response.lost_focus() && ui.input().key_pressed(egui::Key::Enter)) {
+                        if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
                             let socketaddr: Option<SocketAddr> = match player.txt.parse() {
                                 Ok(addr) => Some(addr),
                                 Err(_) => None,
@@ -399,7 +437,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
         let rot_accel = 0.8;
         // let targetfps = 6000;
-        // while ggez::timer::check_update_time(_ctx, targetfps) {
 
         if keyboard::is_key_pressed(_ctx, KeyCode::Q) {
             // quit the game
@@ -414,7 +451,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
         // let mut delta_time = ggez::timer::delta(_ctx).as_secs_f32();
         if self.network_session.is_none() {
-            println!("no network session");
             return Ok(());
         }
         let sess = &mut self.network_session.as_mut().unwrap();
@@ -451,7 +487,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
         // this is to keep ticks between clients synchronized.
         // if a client is ahead, it will run frames slightly slower to allow catching up
-        let mut delta_time = 1. / 60.0;
+        let delta_time = 1. / 60.0;
         // if sess.frames_ahead() > 0 {
         //     delta_time *= 1.1;
         // }
@@ -470,18 +506,31 @@ impl event::EventHandler<ggez::GameError> for PpanState {
             sess.add_local_input(handle, self.handlers[0].input_handler.snapshot())
                 .unwrap();
         }
+        let targetfps = 60;
+        if !ggez::timer::check_update_time(_ctx, targetfps) {
+            log("frame | skipped");
+            return Ok(());
+        }
 
         match sess.advance_frame() {
             Ok(requests) => {
                 println!("Request size: {:?}", requests.len());
-                requests.iter().for_each(|req| {
+                log(&format!(
+                    "req | start | {} --------------------",
+                    sess.confirmed_frame()
+                ));
+                requests.iter().enumerate().for_each(|(i, req)| {
+                    log(&format!("req | {}/{} ---", i + 1, requests.len()));
                     match req {
                         ggrs::GGRSRequest::LoadGameState { cell, frame } => {
                             println!("REQ: Loading frame {}", frame);
+                            log(&format!("state | load | {}", frame));
                             self.table = cell.load().unwrap();
                         }
                         ggrs::GGRSRequest::SaveGameState { cell, frame } => {
                             println!("REQ: Saving frame {}", frame);
+                            log(&format!("state | save | {}", frame));
+
                             cell.save(*frame, Some(self.table.clone()), None);
                         }
                         ggrs::GGRSRequest::AdvanceFrame { inputs } => {
@@ -493,9 +542,11 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                     sess.current_frame(),
                                     self.skipping_frames
                                 );
+                                log(&format!("req | skip | {}", self.skipping_frames));
                                 return;
                             };
                             println!("frame {}", sess.current_frame());
+                            log(&format!("req | calc | {}", sess.current_frame()));
 
                             for (i, input) in inputs.iter().enumerate() {
                                 match input.1 {
@@ -505,6 +556,11 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                             sess.current_frame(),
                                             i
                                         );
+                                        log(&format!(
+                                            "req | predicted | {} | {}",
+                                            i,
+                                            sess.current_frame(),
+                                        ));
                                     }
                                     ggrs::InputStatus::Disconnected => {
                                         println!(
@@ -512,6 +568,11 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                             sess.current_frame(),
                                             i
                                         );
+                                        log(&format!(
+                                            "req | disconnected | {} | {}",
+                                            i,
+                                            sess.current_frame(),
+                                        ));
                                     }
                                     ggrs::InputStatus::Confirmed => {
                                         println!(
@@ -519,6 +580,11 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                             sess.current_frame(),
                                             i
                                         );
+                                        log(&format!(
+                                            "req | confirmed | {} | {}",
+                                            i,
+                                            sess.current_frame(),
+                                        ));
                                     }
                                 }
                                 let mut handler = NetworkInputHandler::new(input.0);
@@ -782,6 +848,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         }
                     }
                 });
+                log("req | end");
                 ()
             }
             Err(e) => match e {
