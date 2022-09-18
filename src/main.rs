@@ -1,3 +1,4 @@
+use std::mem::{swap, take};
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
 use ggez_egui::egui::ProgressBar;
@@ -65,7 +66,6 @@ struct DebugState {
     show_playarea: bool,
 }
 #[derive(new, Clone)]
-
 struct Paddle {
     id: u16,
     x: f32,
@@ -247,6 +247,14 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     self.handlers[1].input_handler.is_up()
                 ));
                 ui.end_row();
+
+                if ui.button("add player").clicked() {
+                    self.players.push(Player {
+                        addr: PlayerType::Local,
+                        txt: "me".to_string(),
+                    });
+                }
+                ui.end_row();
                 if self.network_session.is_none() {
                     for player in self.players.iter_mut() {
                         ui.label(format!(
@@ -266,10 +274,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                             // }
                         ));
                         let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
-                        if (response).changed() {
-                            println!("maybe i should write rn");
-                            println!("{}", player.txt);
-                        }
                         if (response.lost_focus() && ui.input().key_pressed(egui::Key::Enter)) {
                             let socketaddr: Option<SocketAddr> = match player.txt.parse() {
                                 Ok(addr) => Some(addr),
@@ -292,35 +296,53 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         ui.end_row();
                     }
 
-                    if ui.button("add player").clicked() {
-                        self.players.push(Player {
-                            addr: PlayerType::Local,
-                            txt: "me".to_string(),
-                        });
-                    }
                     if ui.button("start").clicked() {
+                        println!("clicked");
                         // TODO: figure out a way to mess with ownership so that this works
-                        // self.players.iter_mut().enumerate().for_each(|(i, player)| {
-                        //     self.sess_builder = self.sess_builder.add_player(
-                        //         match player.addr {
-                        //             PlayerType::Local =>
-                        //                 PlayerType::Local,
-                        //             PlayerType::Remote(addr) =>
-                        //                 PlayerType::Remote(addr),
-                        //             PlayerType::Spectator(addr) =>
-                        //                 PlayerType::Spectator(addr),
-                        //         },
-                        //         i
-                        //     ).unwrap();
-                        // });
-                        // // self.network_session = Some(2);
+                        self.players.iter_mut().enumerate().for_each(|(i, player)| {
+                            let mut sb: SessionBuilder<GGRSConfig> = SessionBuilder::new();
+                            swap(&mut self.sess_builder, &mut sb);
+                            self.sess_builder = sb
+                                .add_player(
+                                    match player.addr {
+                                        PlayerType::Local => PlayerType::Local,
+                                        PlayerType::Remote(addr) => PlayerType::Remote(addr),
+                                        PlayerType::Spectator(addr) => PlayerType::Spectator(addr),
+                                    },
+                                    i,
+                                )
+                                .unwrap();
+                        });
+                        self.network_session =
+                            Some(
+                                take(&mut self.sess_builder)
+                                    .with_num_players(self.players.len())
+                                    .with_sparse_saving_mode(true)
+                                    .start_p2p_session(
+                                        UdpNonBlockingSocket::bind_to_port(
+                                            if self.reversed_table { 7002 } else { 7001 },
+                                        )
+                                        .unwrap(),
+                                    )
+                                    .unwrap(),
+                            );
+                        println!("started");
                     }
                 }
 
                 if ui.button("quit").clicked() {
                     std::process::exit(0);
                 }
-                if self.network_session.is_some() {
+                if self.network_session.is_some()
+                    && self
+                        .network_session
+                        .as_ref()
+                        .unwrap()
+                        .remote_player_handles()
+                        .len()
+                        > 0
+                {
+                    // println!("we good");
                     let stats = self.network_session.as_ref().unwrap().network_stats(
                         self.network_session
                             .as_ref()
@@ -329,11 +351,18 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     );
                     match stats {
                         Ok(stats) => {
-                            ui.label(format!(
-                                "{} kbps, send queue is {}. {}ms ping. we're around {: >2} frames \
-                                 {: >6}, and the other player is {: >2} frames {: >6}.",
+                            let txt = format!(
+                                "{} kbps, send queue is {} ({} confirmed frame{}). {}ms ping. \
+                                 we're around {: >2} frames {: >6}, and the other player ({}) is \
+                                 {: >2} frames {: >6}",
                                 stats.kbps_sent,
                                 stats.send_queue_len,
+                                self.network_session.as_ref().unwrap().confirmed_frame(),
+                                if self.network_session.as_ref().unwrap().confirmed_frame() == 1 {
+                                    ""
+                                } else {
+                                    "s"
+                                },
                                 stats.ping,
                                 stats.local_frames_behind.abs(),
                                 if stats.local_frames_behind > 0 {
@@ -341,16 +370,23 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                 } else {
                                     "ahead"
                                 },
+                                self.network_session
+                                    .as_ref()
+                                    .unwrap()
+                                    .remote_player_handles()[0],
                                 stats.remote_frames_behind.abs(),
                                 if stats.remote_frames_behind > 0 {
                                     "behind"
                                 } else {
                                     "ahead"
                                 },
-                            ));
+                            );
+                            ui.label(txt.clone());
+                            // println!("stats {}", txt);
                         }
                         Err(e) => {
                             ui.label(format!("network stats unavailable: {}", e));
+                            println!("unav {}", e);
                         }
                     }
                 } else {
@@ -378,6 +414,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
         // let mut delta_time = ggez::timer::delta(_ctx).as_secs_f32();
         if self.network_session.is_none() {
+            println!("no network session");
             return Ok(());
         }
         let sess = &mut self.network_session.as_mut().unwrap();
@@ -385,17 +422,36 @@ impl event::EventHandler<ggez::GameError> for PpanState {
         // if sess.frames_ahead() > 0 {
         //     delta_time *= 1.1;
         // }
-        // print GGRS events
+        // // print GGRS events
         for event in sess.events() {
-            if let GGRSEvent::WaitRecommendation { skip_frames } = event {
-                self.skipping_frames += skip_frames
+            match event {
+                GGRSEvent::Synchronizing { addr, total, count } => println!(
+                    "Synchronizing with player {} ({} of {})",
+                    addr, count, total
+                ),
+                GGRSEvent::Synchronized { addr } => println!("Synchronized with player {}", addr),
+                GGRSEvent::Disconnected { addr } => println!("Player {} disconnected", addr),
+                GGRSEvent::NetworkInterrupted {
+                    addr,
+                    disconnect_timeout,
+                } => println!(
+                    "Player {} network interrupted, disconnecting in {}ms...",
+                    addr, disconnect_timeout
+                ),
+                GGRSEvent::NetworkResumed { addr } => println!("Player {} network resumed!", addr),
+                GGRSEvent::WaitRecommendation { skip_frames } => {
+                    self.skipping_frames = skip_frames;
+                    println!(
+                        "Wait recommended, attempting to skip {} frames to catch up",
+                        skip_frames
+                    )
+                }
             }
-            println!("Event: {:?}", event);
         }
 
         // this is to keep ticks between clients synchronized.
         // if a client is ahead, it will run frames slightly slower to allow catching up
-        let delta_time = 1. / 60.0;
+        let mut delta_time = 1. / 60.0;
         // if sess.frames_ahead() > 0 {
         //     delta_time *= 1.1;
         // }
@@ -433,11 +489,13 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                             if self.skipping_frames > 0 {
                                 self.skipping_frames -= 1;
                                 println!(
-                                    "Frame {} skipped: WaitRecommendation",
-                                    sess.current_frame()
+                                    "skipped frame {}, planning to skip {} more",
+                                    sess.current_frame(),
+                                    self.skipping_frames
                                 );
                                 return;
                             };
+                            println!("frame {}", sess.current_frame());
 
                             for (i, input) in inputs.iter().enumerate() {
                                 match input.1 {
@@ -726,7 +784,18 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                 });
                 ()
             }
-            Err(e) => panic!("{:?}", e),
+            Err(e) => match e {
+                ggrs::GGRSError::PredictionThreshold => {
+                    panic!("too many frames behind");
+                }
+                ggrs::GGRSError::InvalidRequest { info: _ } => todo!(),
+                ggrs::GGRSError::MismatchedChecksum { frame: _ } => todo!(),
+                ggrs::GGRSError::NotSynchronized => todo!(),
+                ggrs::GGRSError::SpectatorTooFarBehind => todo!(),
+                ggrs::GGRSError::SocketCreationFailed => todo!(),
+                ggrs::GGRSError::PlayerDisconnected => todo!(),
+                ggrs::GGRSError::DecodingError => todo!(),
+            },
         }
         // calculate delta time, but factor in the framerate
 
@@ -872,10 +941,10 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 }
 
 fn main() -> GameResult {
-    let mut local_port = 7001;
-    let mut sess = SessionBuilder::<GGRSConfig>::new()
-        .with_num_players(2)
-        .with_max_prediction_window(20);
+    let local_port = 7001;
+    let sess = SessionBuilder::<GGRSConfig>::new()
+        // .with_num_players(2)
+        .with_max_prediction_window(120);
     // uncap fps
 
     let cb = ggez::ContextBuilder::new("pong", "Jabster28").window_mode(
