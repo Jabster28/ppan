@@ -51,21 +51,21 @@ publish:
     - cp target/release/ppan dist
     - mkdir -p assets
     - cp -r assets dist/
-    - "butler push dist jabster28/ppan:linux-32bit-stsable --userversion $CI_COMMIT_TAG"
+    - "./butler push dist jabster28/ppan:linux-32bit-stable --userversion $CI_COMMIT_TAG"
 
 test-code:
   stage: test
   script:
-    - cargo test
-    - cargo install cargo-tarpaulin
-    - cargo tarpaulin --ignore-tests
+    - cargo install junitify
+    - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
+
 
 lint-code:
   stage: test
   script:
     - rustup component add clippy
     - cargo clippy -- -D warnings
-    
+
 format-code:
   stage: test
   script:
