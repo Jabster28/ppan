@@ -1,4 +1,3 @@
-#![feature(unboxed_closures)]
 use ggez_egui::egui::ProgressBar;
 use ggez_egui::{egui, EguiBackend};
 
