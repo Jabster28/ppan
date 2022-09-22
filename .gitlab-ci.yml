@@ -4,7 +4,7 @@ default:
   before_script:
     - rustc --version 
     - cargo --version
-    - apt-get update -qq && apt-get install libudev-dev alsa-base libasound2-de alsa-utils -qq
+    - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
   artifacts:
     paths:
       - target/release/ppan
