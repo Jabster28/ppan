@@ -12,7 +12,7 @@ butler:
     ./butler -V
 
 cleanup:
-    rm -rf butler butler.zip 7z.so
+    rm -rf butler butler.zip 7z.so libc7zip.so
 
 package: build butler
     rm -rf dist
@@ -28,7 +28,7 @@ linux:
     cp ppan.sh dist/ppan
     mkdir -p dist/{{arch()}}
     -copydeps target/release/ppan dist/{{arch()}}
-    
+
 
 macos:
     cargo install cargo-bundle
@@ -38,13 +38,27 @@ macos:
     cp -r target/release/bundle/osx/ppan.app dist/
 
 
+# publishes to itch
+publish version arch="64": package
+    ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit" --userversion {{version}}
+    just cleanup
+
 # publishes beta to itch
 publish-beta version arch="64": package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit-(beta)" --userversion {{version}}
     just cleanup
 
 
-# publishes to itch
-publish version arch="64": package
-    ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit" --userversion {{version}}
+win:
+    apt-get install mingw-w64 -qq
+    rustup target add x86_64-pc-windows-gnu
+    cargo build --target x86_64-pc-windows-gnu --release
+    cp -r assets dist/
+    cp target/x86_64-pc-windows-gnu/release/ppan.exe dist/
+
+publish-win version: win butler
+    ./butler push dist "jabster28/ppan:windows-64-bit" --userversion {{version}}
+    just cleanup
+publish-beta-win version: win butler
+    ./butler push dist "jabster28/ppan:windows-64-bit-(beta)" --userversion {{version}}
     just cleanup
