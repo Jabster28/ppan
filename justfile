@@ -28,7 +28,7 @@ linux:
     cp target/release/ppan dist/ppan.{{arch()}}
     cp ppan.sh dist/ppan
     mkdir -p dist/{{arch()}}
-    copydeps target/release/ppan dist/{{arch()}}
+    -copydeps target/release/ppan dist/{{arch()}}
 
 macos:
     cargo install cargo-bundle
