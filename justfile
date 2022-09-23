@@ -6,7 +6,7 @@ test:
 build: test
     cargo build --release
 
-# installs butler
+# installs butler (only works on linux tho)
 butler:
     cp "$(which butler)" . || (curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default && unzip butler.zip && chmod +x butler)
     ./butler -V
@@ -19,10 +19,16 @@ package: build butler
     mkdir -p dist
     mkdir -p assets
     just {{os()}}
+    just cleanup
+
 
 linux:
+    cargo install copydeps
     cp -r assets dist/
-    cp target/release/ppan dist
+    cp target/release/ppan dist/ppan.{{arch()}}
+    cp ppan.sh dist/ppan
+    mkdir -p dist/{{arch()}}
+    copydeps target/release/ppan dist/{{arch()}}
 
 macos:
     cargo install cargo-bundle
@@ -35,9 +41,7 @@ macos:
 # publishes beta to itch
 publish-beta version arch="64": package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit-(beta)" --userversion {{version}}
-    just cleanup
 
 # publishes to itch
 publish version arch="64": package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit" --userversion {{version}}
-    just cleanup
