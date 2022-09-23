@@ -2,12 +2,15 @@ image: "rust:latest"
 
 default:
   before_script:
-    - rustc --version 
+    - rustc --version
     - cargo --version
     - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
   artifacts:
     paths:
       - target/release/ppan
+cache:
+  paths:
+    - target/
 
 stages:
   - test
@@ -33,7 +36,7 @@ publish-beta:
     - cp target/release/ppan dist
     - mkdir -p assets
     - cp -r assets dist/
-    - "butler push dist jabster28/ppan:linux-32bit-beta --userversion $CI_COMMIT_TAG"
+    - "./butler push dist jabster28/ppan:linux-32bit-beta --userversion $CI_COMMIT_TAG"
 
 publish:
   rules:
