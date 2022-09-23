@@ -63,3 +63,30 @@ test-code:
     - cargo clippy -- -D warnings
     - cargo install junitify
     - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
+
+
+publish-macos:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+b\-\d+/'
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+/' # A specific tag with 'X.Y.Z' pattern is created
+  stage: release
+  script:
+    - just publish $CI_COMMIT_TAG
+  artifacts:
+    paths:
+      - dist
+  tags:
+    - macos
+
+publish-beta-macos:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+b\-\d+/'
+  stage: release
+  script:
+    - just publish-beta $CI_COMMIT_TAG
+  artifacts:
+    paths:
+      - dist
+  tags:
+    - macos
