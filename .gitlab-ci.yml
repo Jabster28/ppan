@@ -1,5 +1,8 @@
 image: "rust:latest"
 
+variables:
+  CARGO_HOME: "/cache/cargo/"
+
 default:
   before_script:
     - rustc --version
@@ -10,6 +13,7 @@ default:
 cache:
   paths:
     - target/
+    - /cache/cargo/
 
 stages:
   - test
