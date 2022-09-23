@@ -19,7 +19,6 @@ package: build butler
     mkdir -p dist
     mkdir -p assets
     just {{os()}}
-    just cleanup
 
 
 linux:
@@ -29,6 +28,7 @@ linux:
     cp ppan.sh dist/ppan
     mkdir -p dist/{{arch()}}
     -copydeps target/release/ppan dist/{{arch()}}
+    
 
 macos:
     cargo install cargo-bundle
@@ -41,7 +41,10 @@ macos:
 # publishes beta to itch
 publish-beta version arch="64": package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit-(beta)" --userversion {{version}}
+    just cleanup
+
 
 # publishes to itch
 publish version arch="64": package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit" --userversion {{version}}
+    just cleanup
