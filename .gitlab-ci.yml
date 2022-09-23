@@ -1,7 +1,7 @@
 image: "rust:latest"
 
 variables:
-  CARGO_HOME: "/cache/cargo/"
+  CARGO_HOME: ".cargo/"
 
 default:
   before_script:
@@ -9,11 +9,12 @@ default:
     - cargo --version
     - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
     - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+    - export PATH="$CI_PROJECT_DIR/.cargo/bin:$PATH"
 
 cache:
   paths:
     - target/
-    - /cache/cargo/
+    - .cargo/
 
 stages:
   - test
