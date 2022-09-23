@@ -57,18 +57,9 @@ publish:
 test-code:
   stage: test
   script:
-    - cargo install junitify
-    - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
-
-
-lint-code:
-  stage: test
-  script:
-    - rustup component add clippy
-    - cargo clippy -- -D warnings
-
-format-code:
-  stage: test
-  script:
     - rustup component add rustfmt
     - cargo fmt -- --check
+    - rustup component add clippy
+    - cargo clippy -- -D warnings
+    - cargo install junitify
+    - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
