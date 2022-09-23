@@ -6,9 +6,7 @@ default:
     - cargo --version
     - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
     - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
-  artifacts:
-    paths:
-      - target/release/ppan
+
 cache:
   paths:
     - target/
@@ -25,14 +23,19 @@ compile:
   stage: build
   script:
     - cargo build --release
+  artifacts:
+    paths:
+      - target/release/ppan
 
 publish-beta:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+b\-\d+/' # A specific tag with 'X.Y.Zb-V' pattern is created
   stage: release
   script:
-    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
     - just publish-beta $CI_COMMIT_TAG
+  artifacts:
+    paths:
+      - dist
 
 publish:
   rules:
@@ -41,8 +44,10 @@ publish:
     - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+/' # A specific tag with 'X.Y.Z' pattern is created
   stage: release
   script:
-    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
     - just publish $CI_COMMIT_TAG
+  artifacts:
+    paths:
+      - dist
 
 test-code:
   stage: test
