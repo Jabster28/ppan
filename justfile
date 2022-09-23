@@ -50,6 +50,8 @@ publish-beta version arch="64": package
 
 
 win:
+    rm -rf dist
+    mkdir -p dist
     apt-get install mingw-w64 -qq
     rustup target add x86_64-pc-windows-gnu
     cargo build --target x86_64-pc-windows-gnu --release
