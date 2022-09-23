@@ -5,6 +5,7 @@ default:
     - rustc --version
     - cargo --version
     - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
+    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
   artifacts:
     paths:
       - target/release/ppan
@@ -18,6 +19,9 @@ stages:
   - release
 
 compile:
+  rules:
+    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+/'
+      when: never
   stage: build
   script:
     - cargo build --release
@@ -27,16 +31,8 @@ publish-beta:
     - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+b\-\d+/' # A specific tag with 'X.Y.Zb-V' pattern is created
   stage: release
   script:
-    - curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
-    - unzip butler.zip
-    - chmod +x butler
-    - ./butler -V
-    - cargo build --release
-    - mkdir -p dist
-    - cp target/release/ppan dist
-    - mkdir -p assets
-    - cp -r assets dist/
-    - "./butler push dist jabster28/ppan:linux-64bit-beta --userversion $CI_COMMIT_TAG"
+    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+    - just publish-beta $CI_COMMIT_TAG
 
 publish:
   rules:
@@ -45,16 +41,8 @@ publish:
     - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+/' # A specific tag with 'X.Y.Z' pattern is created
   stage: release
   script:
-    - curl -L -o butler.zip https://broth.itch.ovh/butler/linux-amd64/LATEST/archive/default
-    - unzip butler.zip
-    - chmod +x butler
-    - ./butler -V
-    - cargo build --release
-    - mkdir -p dist
-    - cp target/release/ppan dist
-    - mkdir -p assets
-    - cp -r assets dist/
-    - "./butler push dist jabster28/ppan:linux-64bit-stable --userversion $CI_COMMIT_TAG"
+    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+    - just publish $CI_COMMIT_TAG
 
 test-code:
   stage: test
