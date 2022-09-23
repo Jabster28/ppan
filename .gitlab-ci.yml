@@ -36,7 +36,7 @@ publish-beta:
     - cp target/release/ppan dist
     - mkdir -p assets
     - cp -r assets dist/
-    - "./butler push dist jabster28/ppan:linux-32bit-beta --userversion $CI_COMMIT_TAG"
+    - "./butler push dist jabster28/ppan:linux-64bit-beta --userversion $CI_COMMIT_TAG"
 
 publish:
   rules:
@@ -54,7 +54,7 @@ publish:
     - cp target/release/ppan dist
     - mkdir -p assets
     - cp -r assets dist/
-    - "./butler push dist jabster28/ppan:linux-32bit-stable --userversion $CI_COMMIT_TAG"
+    - "./butler push dist jabster28/ppan:linux-64bit-stable --userversion $CI_COMMIT_TAG"
 
 test-code:
   stage: test
