@@ -65,6 +65,9 @@ test-code:
     - cargo clippy -- -D warnings
     - cargo install junitify
     - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
+  artifacts:
+    reports:
+      junit: tests/*.xml
 
 
 publish-macos:

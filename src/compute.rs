@@ -1,4 +1,11 @@
 use input_handlers::InputHandler;
+extern crate test;
+
+macro_rules! debug {
+    ($x:expr) => {
+        dbg!($x)
+    };
+}
 
 use crate::Paddle;
 
@@ -80,10 +87,11 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
         let mut first_displacement = paddle.next_stop - paddle.rotation;
         let mut second_displacement = paddle.next_stop - paddle.rotation - 180.0;
         // lmk if they're both positive or negative
+        #[cfg(debug_assertions)]
         if (first_displacement > 0.0 && second_displacement > 0.0)
             || (first_displacement < 0.0 && second_displacement < 0.0)
         {
-            println!("woah there, that's a lot of rotation");
+            debug!("woah there, that's a lot of rotation");
         }
         // if our current rotation is greater than the next stop, we need to add 360 to both displacements
         if first_displacement < 0.0 && second_displacement < 0.0 {
@@ -109,8 +117,9 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
             -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
 
         // if they're both positive, something went wrong. log
+        #[cfg(debug_assertions)]
         if initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0 {
-            println!("the fuck?");
+            debug!("the fuck?");
         }
 
         let init_vel_sq_cw = if initial_velocity_squared_first > initial_velocity_squared_second {
@@ -123,30 +132,42 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
         } else {
             initial_velocity_squared_first
         };
-        println!(
+        #[cfg(debug_assertions)]
+        debug!(format!(
             "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going \
              anticlockwise, we'd need a velocity of {:?}",
             init_vel_sq_cw.sqrt(),
             -(init_vel_sq_acw.abs().sqrt()),
-        );
+        ));
         // check nan
+        #[cfg(debug_assertions)]
         if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
-            println!("one of the velocities is nan");
+            debug!("one of the velocities is nan");
         }
+
         let initial_velocity_squared = if paddle.going_acw {
-            println!("we need to go left, so we're using anticlockwise");
+            #[cfg(debug_assertions)]
+            debug!("we need to go left, so we're using anticlockwise");
             init_vel_sq_acw
         } else if paddle.going_cw {
-            println!("we need to go right, so we're using clockwise");
+            #[cfg(debug_assertions)]
+
+            debug!("we need to go right, so we're using clockwise");
             init_vel_sq_cw
         } else {
             // use the shortest one
-            println!("we're not aiming anywhere, so we're using the shortest one");
+            #[cfg(debug_assertions)]
+
+            debug!("we're not aiming anywhere, so we're using the shortest one");
             if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
-                println!("using clockwise, {:?}", init_vel_sq_cw);
+                #[cfg(debug_assertions)]
+
+                debug!(format!("using clockwise, {:?}", init_vel_sq_cw));
                 init_vel_sq_cw
             } else {
-                println!("using anticlockwise, {:?}", init_vel_sq_acw);
+                #[cfg(debug_assertions)]
+
+                debug!(format!("using anticlockwise, {:?}", init_vel_sq_acw));
                 init_vel_sq_acw
             }
         };
@@ -161,7 +182,7 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
         // should save us a couple cpu cycles
         paddle.rotation = paddle.next_stop;
     }
-    // println!("initial_velocity: {}", initial_velocity);
+    // debug!("initial_velocity: {}", initial_velocity);
     paddle.rotation_velocity = initial_velocity;
 
     // cap rotation velocity
@@ -183,7 +204,7 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
     paddle.rotation += paddle.rotation_velocity;
 
     // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
-    // println!(
+    // debug!(
     //     "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
     //     // pad start to 3 chars
     //     paddle.x.round(),
@@ -218,5 +239,49 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
     } else if paddle.y > 600.0 {
         paddle.y = 600.0;
         paddle.velocity_y = 0.0;
+    }
+}
+#[cfg(test)]
+mod tests {
+    use test::Bencher;
+
+    use input_handlers::NetworkInputHandler;
+
+    use super::*;
+
+    #[test]
+    fn rot_right() {
+        let mut paddle = Paddle::new(0, 0.0, false);
+        let handler = NetworkInputHandler::new(16);
+        compute(&handler, &mut paddle, 16.0 / 1000.0);
+        let handler = NetworkInputHandler::new(0);
+
+        for i in 1..100 {
+            compute(&handler, &mut paddle, 16.0 / 1000.0);
+        }
+        assert_eq!(paddle.rotation, 90.0);
+    }
+
+    #[test]
+    fn rot_left() {
+        let mut paddle = Paddle::new(0, 0.0, false);
+        let handler = NetworkInputHandler::new(31);
+        compute(&handler, &mut paddle, 16.0 / 1000.0);
+        let handler = NetworkInputHandler::new(0);
+
+        for i in 1..100 {
+            compute(&handler, &mut paddle, 16.0 / 1000.0);
+        }
+        assert_eq!(paddle.rotation, 90.0);
+    }
+
+    #[bench]
+    fn bench_rotations(b: &mut Bencher) {
+        let handler = NetworkInputHandler::new(16);
+        let mut paddle = Paddle::new(0, 0.0, false);
+        let delta = 16.0 / 1000.0;
+        b.iter(|| {
+            compute(&handler, &mut paddle, delta);
+        });
     }
 }
