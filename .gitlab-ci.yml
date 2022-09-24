@@ -21,17 +21,6 @@ stages:
   - build
   - release
 
-compile:
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+/'
-      when: never
-  stage: build
-  script:
-    - cargo build --release
-  artifacts:
-    paths:
-      - target/release/ppan
-
 publish-beta:
   rules:
     - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+b\-\d+/' # A specific tag with 'X.Y.Zb-V' pattern is created
@@ -63,9 +52,11 @@ test-code:
     - cargo fmt -- --check
     - rustup component add clippy
     - cargo install gitlab_clippy
-    - cargo clippy -- -W clippy::pedantic --message-format=json | gitlab-clippy > gl-code-quality-report.json
     - cargo install junitify
     - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
+    # need to build before running clippy for some reson (took me TWENTY MINUTES to figure this out)
+    - cargo build
+    - cargo clippy -- -W clippy::pedantic --message-format=json | gitlab-clippy > gl-code-quality-report.json
   artifacts:
     when: always
     paths:
