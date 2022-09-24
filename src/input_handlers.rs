@@ -210,7 +210,7 @@ impl InputHandler for KeyboardInputHandler {
         let mut snapshot: u8 = 0;
         for (i, result) in results.iter().enumerate() {
             if *result {
-                snapshot += 1 * 2u8.pow(i as u32);
+                snapshot += 2u8.pow(i as u32);
             }
         }
         snapshot
@@ -285,7 +285,7 @@ impl InputHandler for NetworkInputHandler {
         let mut snapshot: u8 = 0;
         for (i, result) in results.iter().enumerate() {
             if *result {
-                snapshot += 1 * 2u8.pow(i as u32);
+                snapshot += 2u8.pow(i as u32);
             }
         }
         snapshot
