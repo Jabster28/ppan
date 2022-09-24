@@ -63,7 +63,7 @@ test-code:
     - cargo fmt -- --check
     - rustup component add clippy
     - cargo install gitlab_clippy
-    - cargo clippy -W clippy::pedantic --message-format=json | gitlab-clippy > gl-code-quality-report.json
+    - cargo clippy -- -W clippy::pedantic --message-format=json | gitlab-clippy > gl-code-quality-report.json
     - cargo install junitify
     - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
   artifacts:
