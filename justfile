@@ -14,7 +14,7 @@ butler:
 cleanup:
     rm -rf butler butler.zip 7z.so libc7zip.so
 
-package: build butler
+package: build
     rm -rf dist
     mkdir -p dist
     mkdir -p assets
@@ -39,12 +39,12 @@ macos:
 
 
 # publishes to itch
-publish version arch="64": package
+publish version arch="64": butler package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit" --userversion {{version}}
     just cleanup
 
 # publishes beta to itch
-publish-beta version arch="64": package
+publish-beta version arch="64": butler package
     ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit-(beta)" --userversion {{version}}
     just cleanup
 
