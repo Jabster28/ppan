@@ -6,7 +6,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::mem::{swap, take, MaybeUninit};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -14,7 +14,6 @@ use std::time::{Duration, Instant, SystemTime};
 
 use ggez_egui::egui::ProgressBar;
 
-use bincode::{deserialize, serialize};
 use derive_new::new;
 use ggez::event::{self, KeyCode};
 use ggez::graphics::{self, Color, Rect};
@@ -198,7 +197,7 @@ pub struct Paddle {
 }
 struct Handler {
     input_handler: Box<dyn InputHandler>,
-    affected_paddles: Vec<u16>,
+    // affected_paddles: Vec<u16>,
 }
 // impl Paddle {
 //     fn new(left: bool) -> Paddle {
@@ -225,7 +224,7 @@ impl PpanState {
     fn new(sess: SessionBuilder<GGRSConfig>, reversed_table: bool) -> GameResult<PpanState> {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            rx.try_recv().unwrap_or("".to_string());
+            rx.try_recv().unwrap_or_else(|_| "".to_string());
             // println!("failed + L + ratio");
             // create ppan.log
 
@@ -244,7 +243,7 @@ impl PpanState {
             mcast: Arc::new(AtomicBool::new(false)),
             mcastthread: None,
             mode: MultiplayerMode::None,
-            tx: tx.clone(),
+            tx,
             table: TableState {
                 paddles: vec![
                     Paddle::new(
@@ -305,7 +304,7 @@ impl PpanState {
                             KeyCode::C
                         },
                     )),
-                    affected_paddles: vec![0],
+                    // affected_paddles: vec![0],
                 },
                 Handler {
                     // input_handler: Box::new(KeyboardInputHandler::new(
@@ -317,7 +316,7 @@ impl PpanState {
                     //     KeyCode::Comma,
                     // )),
                     input_handler: Box::new(EmptyInputHandler {}),
-                    affected_paddles: vec![1],
+                    // affected_paddles: vec![1],
                 },
             ],
             sess_builder: sess,
@@ -328,6 +327,7 @@ impl PpanState {
             reversed_table,
             players: vec![],
         };
+        println!("{}", s.table.paddles[0].left);
         Ok(s)
     }
 }
@@ -413,7 +413,10 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                         Err(_) => None,
                                     };
 
-                                    if socketaddr.is_none() {
+                                    if let Some(socket) = socketaddr {
+                                        println!("new address: {}", socket);
+                                        player.addr = PlayerType::Remote(socket);
+                                    } else {
                                         println!("invalid address");
                                         player.txt = match player.addr {
                                             PlayerType::Local => "me".to_string(),
@@ -421,9 +424,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                             PlayerType::Spectator(addr) => addr.to_string(),
                                         };
                                         return;
-                                    } else {
-                                        println!("new address: {}", socketaddr.unwrap());
-                                        player.addr = PlayerType::Remote(socketaddr.unwrap());
                                     }
                                 }
                                 ui.end_row();
@@ -516,7 +516,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
                         let thread =
                             std::thread::Builder::new()
-                                .name(format!("{}", ""))
+                                .name(name.to_string())
                                 .spawn(move || {
                                     let name = "host";
                                     // socket creation will go here...
@@ -608,7 +608,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
                         let thread =
                             std::thread::Builder::new()
-                                .name(format!("{}", ""))
+                                .name(name.to_string())
                                 .spawn(move || {
                                     let name = "client";
                                     // socket creation will go here...
@@ -659,7 +659,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         println!("{}: joined: {}", name, addr);
                         let data = ShareData {
                             hostname: hostname::get()
-                                .unwrap_or("Player".into())
+                                .unwrap_or_else(|_| "Player".into())
                                 .to_str()
                                 .unwrap()
                                 .to_string(),
@@ -669,8 +669,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         };
                         let data = bincode::serialize(&data).unwrap();
                         let data = data.as_slice();
-                        let message = format!("{}", env!("CURRENT_TAG")).into_bytes();
-                        let message = message.as_slice();
+                        // let message = format!("{}", env!("CURRENT_TAG")).into_bytes();
+                        // let message = message.as_slice();
 
                         // create the sending socket
                         let socket = new_sender(&addr).expect("could not create sender!");
@@ -681,13 +681,12 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                 };
 
                 if self.network_session.is_some()
-                    && self
+                    && !self
                         .network_session
                         .as_ref()
                         .unwrap()
                         .remote_player_handles()
-                        .len()
-                        > 0
+                        .is_empty()
                 {
                     // println!("we good");
                     let stats = self.network_session.as_ref().unwrap().network_stats(
@@ -728,7 +727,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                     "ahead"
                                 },
                             );
-                            ui.label(txt.clone());
+                            ui.label(txt);
                             // println!("stats {}", txt);
                         }
                         Err(e) => {
@@ -922,7 +921,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     }
                 });
                 log("req | end");
-                ()
             }
             Err(e) => match e {
                 ggrs::GGRSError::PredictionThreshold => {
