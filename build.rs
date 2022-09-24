@@ -5,7 +5,7 @@ static CARGOENV: &str = "cargo:rustc-env=";
 
 fn main() {
     let tag = match Command::new("git")
-        .args(&["describe", "--tags", "--abbrev=0", "--always"])
+        .args(["describe", "--tags", "--abbrev=0", "--always"])
         .output()
     {
         Ok(output) => str::from_utf8(output.stdout.as_slice())
