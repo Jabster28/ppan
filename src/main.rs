@@ -1,4 +1,3 @@
-#![feature(thread_is_running)]
 #![feature(test)]
 
 pub mod compute;
@@ -8,7 +7,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::mem::{swap, take, MaybeUninit};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -83,23 +82,24 @@ fn new_socket(addr: &SocketAddr) -> io::Result<Socket> {
 
     Ok(socket)
 }
-fn new_sender(addr: &SocketAddr) -> io::Result<Socket> {
-    let socket = new_socket(addr)?;
 
-    if addr.is_ipv4() {
-        socket.bind(&SockAddr::from(SocketAddr::new(
-            Ipv4Addr::new(0, 0, 0, 0).into(),
-            0,
-        )))?;
-    } else {
-        socket.bind(&SockAddr::from(SocketAddr::new(
-            Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).into(),
-            0,
-        )))?;
-    }
+// fn new_sender(addr: &SocketAddr) -> io::Result<Socket> {
+//     let socket = new_socket(addr)?;
 
-    Ok(socket)
-}
+//     if addr.is_ipv4() {
+//         socket.bind(&SockAddr::from(SocketAddr::new(
+//             Ipv4Addr::new(0, 0, 0, 0).into(),
+//             0,
+//         )))?;
+//     } else {
+//         socket.bind(&SockAddr::from(SocketAddr::new(
+//             Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).into(),
+//             0,
+//         )))?;
+//     }
+
+//     Ok(socket)
+// }
 
 fn join_multicast(addr: SocketAddr) -> io::Result<Socket> {
     let ip_addr = addr.ip();
@@ -382,7 +382,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     self.handlers[1].input_handler.is_up()
                 ));
                 ui.end_row();
-                let _ = match &self.mode {
+                match &self.mode {
                     MultiplayerMode::Manual => {
                         if ui.button("add player").clicked() {
                             self.players.push(Player {
@@ -720,7 +720,6 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                                                             })
                                                                             .to_str()
                                                                             .unwrap()
-                                                                            .to_string()
                                                                     );
                                                                 } else {
                                                                     println!(
@@ -738,10 +737,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                                         }
                                                         Err(err) => {
                                                             println!(
-                                                                "{}: got data: {} from: {:?}",
-                                                                name,
-                                                                String::from_utf8_lossy(data),
-                                                                remote_addr
+                                                                "{}: got err: {} from: {:?}",
+                                                                name, err, remote_addr
                                                             );
                                                         }
                                                     }
