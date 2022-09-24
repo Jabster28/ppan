@@ -1,4 +1,6 @@
 #![feature(thread_is_running)]
+#![feature(test)]
+
 pub mod compute;
 
 use local_ip_address::local_ip;
@@ -6,7 +8,7 @@ use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::fs::OpenOptions;
 use std::io::prelude::*;
 use std::mem::{swap, take, MaybeUninit};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc};
 use std::thread;
@@ -43,7 +45,9 @@ struct ShareData {
     port: u16,
     ip: String,
     version: String,
+    hosting: bool,
 }
+
 enum MultiplayerMode {
     LocalClient,
     LocalHost,
@@ -539,28 +543,70 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                                         .collect::<Vec<u8>>();
                                                     let data = data.as_slice();
 
-                                                    println!(
-                                                        "{}: got data: {} from: {:?}",
-                                                        name,
-                                                        String::from_utf8_lossy(data),
-                                                        remote_addr
-                                                    );
+                                                    match bincode::deserialize::<ShareData>(data) {
+                                                        Ok(data) => {
+                                                            if data.hosting {
+                                                                println!(
+                                                                    "{}: found host, ignoring...",
+                                                                    name
+                                                                )
+                                                            } else {
+                                                                println!(
+                                                                    "{}: found client {} ({}), \
+                                                                     responding with host info...",
+                                                                    name, data.hostname, data.ip
+                                                                );
+                                                                let data = ShareData {
+                                                                    hosting: true,
+                                                                    ip: local_ip()
+                                                                        .unwrap()
+                                                                        .to_string(),
+                                                                    hostname: hostname::get()
+                                                                        .unwrap()
+                                                                        .to_string_lossy()
+                                                                        .to_string(),
+                                                                    port: 7101,
+                                                                    version: env!("CURRENT_TAG")
+                                                                        .to_string(),
+                                                                };
+                                                                let data =
+                                                                    bincode::serialize(&data)
+                                                                        .unwrap();
+                                                                // wait 2000ms to make sure the client has time to start listening
+                                                                // std::thread::sleep(
+                                                                //     Duration::from_millis(2000),
+                                                                // );
+                                                                // let socket = new_socket(
+                                                                //     &remote_addr
+                                                                //         .as_socket()
+                                                                //         .unwrap(),
+                                                                // )
+                                                                // .unwrap();
+                                                                listener
+                                                                    .set_multicast_if_v4(
+                                                                        &Ipv4Addr::new(0, 0, 0, 0),
+                                                                    )
+                                                                    .unwrap();
+                                                                listener
+                                                                    .send_to(
+                                                                        &data,
+                                                                        &SockAddr::from(
+                                                                            remote_addr
+                                                                                .as_socket()
+                                                                                .unwrap(),
+                                                                        ),
+                                                                    )
+                                                                    .expect("could not send_to!");
+                                                            }
+                                                        }
+                                                        Err(err) => {
+                                                            println!(
+                                                                "{}: error deserializing data: {}",
+                                                                name, err
+                                                            );
+                                                        }
+                                                    }
                                                 }
-
-                                                // create a socket to send the response
-                                                let responder =
-                                                    new_socket(&remote_addr.as_socket().unwrap())
-                                                        .expect("failed to create responder");
-
-                                                // we send the response that was set at the method beginning
-                                                responder
-                                                    .send_to(name.as_bytes(), &remote_addr)
-                                                    .expect("failed to respond");
-
-                                                println!(
-                                                    "{}: sent response to: {:?}",
-                                                    name, remote_addr
-                                                );
                                             }
                                             Err(err) => {
                                                 match err.kind() {
@@ -596,11 +642,10 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         }
                         if ui.button("refresh").clicked() {
                             multicasting.store(false, Ordering::Relaxed);
-                            // wait for the thread to stop
-                            while multicasting.load(Ordering::Relaxed) {}
-                            return;
+                            while !multicasting.load(Ordering::Relaxed) {}
+                            multicasting.store(false, Ordering::Relaxed);
                         }
-                        if self.mcast.load(Ordering::Relaxed) {
+                        if multicasting.load(Ordering::Relaxed) {
                             return;
                         }
                         multicasting.store(true, Ordering::Relaxed);
@@ -610,33 +655,96 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                             std::thread::Builder::new()
                                 .name(name.to_string())
                                 .spawn(move || {
+                                    let listener = join_multicast(addr).unwrap();
                                     let name = "client";
                                     // socket creation will go here...
 
                                     // We'll be looping until the client indicates it is done.
-                                    let listener = join_multicast(addr).unwrap();
                                     // test receive and response code will go here...
                                     let mut buf: [MaybeUninit<u8>; 64] =
                                         [MaybeUninit::<u8>::uninit(); 64];
+                                    {
+                                        let data = ShareData {
+                                            hostname: hostname::get()
+                                                .unwrap_or_else(|_| "Player".into())
+                                                .to_str()
+                                                .unwrap()
+                                                .to_string(),
+                                            port: 7101,
+                                            ip: local_ip().unwrap().to_string(),
+                                            version: env!("CURRENT_TAG").to_string(),
+                                            hosting: false,
+                                        };
+                                        let data = bincode::serialize(&data).unwrap();
+                                        let data = data.as_slice();
+                                        listener
+                                            .set_multicast_if_v4(&Ipv4Addr::new(0, 0, 0, 0))
+                                            .unwrap();
+                                        listener
+                                            .send_to(
+                                                data,
+                                                &SockAddr::from(SocketAddr::new(*IPV4, 7101)),
+                                            )
+                                            .expect("could not send_to!");
+                                    }
 
                                     while thread_multicasting.load(Ordering::Relaxed) {
                                         // we're assuming failures were timeouts, the client_done loop will stop us
-                                        match listener.recv_from(&mut buf) {
+                                        match &listener.recv_from(&mut buf) {
                                             Ok((len, remote_addr)) => {
-                                                let data = &buf[..len];
+                                                let buf = buf.to_owned();
+                                                let len = *len;
+                                                let data: &[MaybeUninit<u8>] = &buf[..len];
                                                 unsafe {
-                                                    let data = data
+                                                    let data: Vec<u8> = data
                                                         .iter()
                                                         .map(|x| x.assume_init())
                                                         .collect::<Vec<u8>>();
                                                     let data = data.as_slice();
 
-                                                    println!(
-                                                        "{}: got data: {} from: {:?}",
-                                                        name,
-                                                        String::from_utf8_lossy(data),
-                                                        remote_addr
-                                                    );
+                                                    match bincode::deserialize::<ShareData>(data) {
+                                                        Ok(data) => {
+                                                            if !data.hosting {
+                                                                if data.ip
+                                                                    == local_ip()
+                                                                        .unwrap()
+                                                                        .to_string()
+                                                                {
+                                                                    println!(
+                                                                        "{}: found self ({}), \
+                                                                         ignoring...",
+                                                                        name,
+                                                                        hostname::get()
+                                                                            .unwrap_or_else(|_| {
+                                                                                "Player".into()
+                                                                            })
+                                                                            .to_str()
+                                                                            .unwrap()
+                                                                            .to_string()
+                                                                    );
+                                                                } else {
+                                                                    println!(
+                                                                        "{}: found client, \
+                                                                         ignoring...",
+                                                                        name
+                                                                    )
+                                                                }
+                                                            } else {
+                                                                println!(
+                                                                    "{}: found host! {} ({})",
+                                                                    name, data.hostname, data.ip
+                                                                );
+                                                            }
+                                                        }
+                                                        Err(err) => {
+                                                            println!(
+                                                                "{}: got data: {} from: {:?}",
+                                                                name,
+                                                                String::from_utf8_lossy(data),
+                                                                remote_addr
+                                                            );
+                                                        }
+                                                    }
                                                 }
                                             }
                                             Err(err) => {
@@ -652,31 +760,18 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                         }
                                     }
 
+                                    thread_multicasting.store(true, Ordering::Relaxed);
                                     println!("{}: quitting", name);
                                 });
+
                         self.mcastthread = Some(thread.unwrap());
 
                         println!("{}: joined: {}", name, addr);
-                        let data = ShareData {
-                            hostname: hostname::get()
-                                .unwrap_or_else(|_| "Player".into())
-                                .to_str()
-                                .unwrap()
-                                .to_string(),
-                            port: 7101,
-                            ip: local_ip().unwrap().to_string(),
-                            version: env!("CURRENT_TAG").to_string(),
-                        };
-                        let data = bincode::serialize(&data).unwrap();
-                        let data = data.as_slice();
+
                         // let message = format!("{}", env!("CURRENT_TAG")).into_bytes();
                         // let message = message.as_slice();
 
                         // create the sending socket
-                        let socket = new_sender(&addr).expect("could not create sender!");
-                        socket
-                            .send_to(data, &SockAddr::from(SocketAddr::new(*IPV4, 7101)))
-                            .expect("could not send_to!");
                     }
                 };
 
@@ -1099,12 +1194,17 @@ fn main() -> GameResult {
 
     event::run(ctx, event_loop, state)
 }
-#[test]
-fn test_ipv4_multicast() {
-    assert!(IPV4.is_multicast());
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
 
-#[test]
-fn test_ipv6_multicast() {
-    assert!(IPV6.is_multicast());
+    #[test]
+    fn test_ipv4_multicast() {
+        assert!(IPV4.is_multicast());
+    }
+
+    #[test]
+    fn test_ipv6_multicast() {
+        assert!(IPV6.is_multicast());
+    }
 }
