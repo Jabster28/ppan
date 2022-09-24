@@ -62,12 +62,18 @@ test-code:
     - rustup component add rustfmt
     - cargo fmt -- --check
     - rustup component add clippy
-    - cargo clippy -- -D warnings
+    - cargo install gitlab_clippy
+    - cargo clippy -W clippy::pedantic --message-format=json | gitlab-clippy > gl-code-quality-report.json
     - cargo install junitify
     - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
   artifacts:
+    when: always
+    paths:
+      - tests/*.xml
     reports:
       junit: tests/*.xml
+      codequality: gl-code-quality-report.json
+
 
 
 publish-macos:
