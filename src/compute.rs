@@ -9,6 +9,7 @@ macro_rules! debug {
 
 use crate::Paddle;
 
+#[allow(clippy::too_many_lines)]
 pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32) {
     let rot_accel = 0.8;
 
@@ -55,8 +56,8 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
         paddle.going_acw = true;
         // get next 90 degree rotation to the left
         paddle.next_stop = (90.0 * (paddle.rotation / 90.0).floor()) as f32;
-        if paddle.next_stop == paddle.rotation {
-            paddle.next_stop -= 90.0
+        if (paddle.next_stop - paddle.rotation).abs() < f32::EPSILON {
+            paddle.next_stop -= 90.0;
         }
         while paddle.next_stop < 0.0 {
             paddle.next_stop += 360.0;
@@ -68,8 +69,9 @@ pub fn compute(handler: &dyn InputHandler, paddle: &mut Paddle, delta_time: f32)
         paddle.going_cw = true;
         // get next 90 degree rotation to the right
         paddle.next_stop = (90.0 * (paddle.rotation / 90.0).ceil()) as f32;
-        if paddle.next_stop == paddle.rotation {
-            paddle.next_stop += 90.0
+        // check if same
+        if (paddle.next_stop - paddle.rotation).abs() < f32::EPSILON {
+            paddle.next_stop += 90.0;
         }
         paddle.next_stop %= 360.0;
     }
@@ -256,7 +258,7 @@ mod tests {
         compute(&handler, &mut paddle, 16.0 / 1000.0);
         let handler = NetworkInputHandler::new(0);
 
-        for i in 1..100 {
+        for _i in 1..100 {
             compute(&handler, &mut paddle, 16.0 / 1000.0);
         }
         assert_eq!(paddle.rotation, 90.0);
@@ -265,14 +267,14 @@ mod tests {
     #[test]
     fn rot_left() {
         let mut paddle = Paddle::new(0, 0.0, false);
-        let handler = NetworkInputHandler::new(31);
+        let handler = NetworkInputHandler::new(32);
         compute(&handler, &mut paddle, 16.0 / 1000.0);
         let handler = NetworkInputHandler::new(0);
 
-        for i in 1..100 {
+        for _i in 1..100 {
             compute(&handler, &mut paddle, 16.0 / 1000.0);
         }
-        assert_eq!(paddle.rotation, 90.0);
+        assert_eq!(paddle.rotation, 270.0);
     }
 
     #[bench]

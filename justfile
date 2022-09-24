@@ -1,7 +1,9 @@
 default:
   just --list
 test:
+    cargo fmt -- --check
     cargo test
+    cargo clippy -- -W clippy::pedantic
 
 build: test
     cargo build --release

@@ -1,5 +1,9 @@
 #![feature(test)]
-
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::similar_names
+)]
 pub mod compute;
 
 use local_ip_address::local_ip;
@@ -31,7 +35,7 @@ use ggrs::{
 };
 // use ggez::mint::Point2;
 use ggez::{Context, GameResult};
-use glam::*;
+use glam::{bool, f32, u32, Vec2};
 use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
 
 use input_handlers::NetworkInputHandler;
@@ -225,10 +229,10 @@ struct Handler {
 // }
 
 impl PpanState {
-    fn new(sess: SessionBuilder<GGRSConfig>, reversed_table: bool) -> GameResult<PpanState> {
+    fn new(sess: SessionBuilder<GGRSConfig>, reversed_table: bool) -> PpanState {
         let (tx, rx) = mpsc::channel();
         thread::spawn(move || {
-            rx.try_recv().unwrap_or_else(|_| "".to_string());
+            rx.try_recv().unwrap_or_else(|_| String::new());
             // println!("failed + L + ratio");
             // create ppan.log
 
@@ -332,12 +336,13 @@ impl PpanState {
             players: vec![],
         };
         println!("{}", s.table.paddles[0].left);
-        Ok(s)
+        s
     }
 }
 
 impl event::EventHandler<ggez::GameError> for PpanState {
-    fn update(&mut self, _ctx: &mut Context) -> GameResult {
+    #[allow(clippy::too_many_lines)]
+    fn update(&mut self, ctx: &mut Context) -> GameResult {
         let log = |msg: &str| match self.tx.send(format!(
             "{}: {}",
             // time
@@ -353,17 +358,17 @@ impl event::EventHandler<ggez::GameError> for PpanState {
             }
         };
         // update window size
-        let (width, height) = graphics::drawable_size(_ctx);
+        let (width, height) = graphics::drawable_size(ctx);
         graphics::set_screen_coordinates(
-            _ctx,
+            ctx,
             graphics::Rect::new(0.0, 0.0, width as f32, height as f32),
         )?;
         let egui_ctx = self.egui.ctx();
         egui::Window::new("Debug Menu")
             .open(&mut self.ui.debug.show_debug)
             .show(&egui_ctx, |ui| {
-                let fps = ProgressBar::new((ggez::timer::fps(_ctx) / 60.0) as f32)
-                    .text(format!("{} FPS", ggez::timer::fps(_ctx).round()));
+                let fps = ProgressBar::new((ggez::timer::fps(ctx) / 60.0) as f32)
+                    .text(format!("{} FPS", ggez::timer::fps(ctx).round()));
                 ui.add(fps);
 
                 ui.label(format!(
@@ -392,7 +397,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                         }
                         ui.end_row();
                         if self.network_session.is_none() {
-                            for player in self.players.iter_mut() {
+                            for player in &mut self.players {
                                 ui.label(format!(
                                     "player type: {}",
                                     match player.addr {
@@ -424,8 +429,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                         println!("invalid address");
                                         player.txt = match player.addr {
                                             PlayerType::Local => "me".to_string(),
-                                            PlayerType::Remote(addr) => addr.to_string(),
-                                            PlayerType::Spectator(addr) => addr.to_string(),
+                                            PlayerType::Remote(addr)
+                                            | PlayerType::Spectator(addr) => addr.to_string(),
                                         };
                                         return;
                                     }
@@ -549,7 +554,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                                                 println!(
                                                                     "{}: found host, ignoring...",
                                                                     name
-                                                                )
+                                                                );
                                                             } else {
                                                                 println!(
                                                                     "{}: found client {} ({}), \
@@ -611,8 +616,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                             Err(err) => {
                                                 match err.kind() {
                                                     // we're assuming failures were timeouts, the client_done loop will stop us
-                                                    std::io::ErrorKind::TimedOut => {}
-                                                    std::io::ErrorKind::WouldBlock => {}
+                                                    std::io::ErrorKind::TimedOut
+                                                    | std::io::ErrorKind::WouldBlock => {}
                                                     _ => {
                                                         panic!("{}: error: {}", name, err);
                                                     }
@@ -704,34 +709,29 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
                                                     match bincode::deserialize::<ShareData>(data) {
                                                         Ok(data) => {
-                                                            if !data.hosting {
-                                                                if data.ip
-                                                                    == local_ip()
-                                                                        .unwrap()
-                                                                        .to_string()
-                                                                {
-                                                                    println!(
-                                                                        "{}: found self ({}), \
-                                                                         ignoring...",
-                                                                        name,
-                                                                        hostname::get()
-                                                                            .unwrap_or_else(|_| {
-                                                                                "Player".into()
-                                                                            })
-                                                                            .to_str()
-                                                                            .unwrap()
-                                                                    );
-                                                                } else {
-                                                                    println!(
-                                                                        "{}: found client, \
-                                                                         ignoring...",
-                                                                        name
-                                                                    )
-                                                                }
-                                                            } else {
+                                                            if data.hosting {
                                                                 println!(
                                                                     "{}: found host! {} ({})",
                                                                     name, data.hostname, data.ip
+                                                                );
+                                                            } else if data.ip
+                                                                == local_ip().unwrap().to_string()
+                                                            {
+                                                                println!(
+                                                                    "{}: found self ({}), \
+                                                                     ignoring...",
+                                                                    name,
+                                                                    hostname::get()
+                                                                        .unwrap_or_else(|_| {
+                                                                            "Player".into()
+                                                                        })
+                                                                        .to_str()
+                                                                        .unwrap()
+                                                                );
+                                                            } else {
+                                                                println!(
+                                                                    "{}: found client, ignoring...",
+                                                                    name
                                                                 );
                                                             }
                                                         }
@@ -747,8 +747,8 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                             Err(err) => {
                                                 match err.kind() {
                                                     // we're assuming failures were timeouts, the client_done loop will stop us
-                                                    std::io::ErrorKind::TimedOut => {}
-                                                    std::io::ErrorKind::WouldBlock => {}
+                                                    std::io::ErrorKind::TimedOut
+                                                    | std::io::ErrorKind::WouldBlock => {}
                                                     _ => {
                                                         panic!("{}: error: {}", name, err);
                                                     }
@@ -840,22 +840,22 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 
         // let targetfps = 6000;
 
-        if keyboard::is_key_pressed(_ctx, KeyCode::Q) {
+        if keyboard::is_key_pressed(ctx, KeyCode::Q) {
             // quit the game
             println!("Quitting game!");
             // self.network_session.disconnect_player(self.network_session.local_player_handles()[0]);
             std::process::exit(0);
         }
 
-        if keyboard::is_key_pressed(_ctx, KeyCode::Backslash) {
+        if keyboard::is_key_pressed(ctx, KeyCode::Backslash) {
             self.ui.debug.show_debug = true;
         }
 
-        // let mut delta_time = ggez::timer::delta(_ctx).as_secs_f32();
+        // let mut delta_time = ggez::timer::delta(ctx).as_secs_f32();
         if self.network_session.is_none() {
             return Ok(());
         }
-        let sess = &mut self.network_session.as_mut().unwrap();
+        let sess = self.network_session.as_mut().unwrap();
         sess.poll_remote_clients();
         // if sess.frames_ahead() > 0 {
         //     delta_time *= 1.1;
@@ -882,7 +882,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     println!(
                         "Wait recommended, attempting to skip {} frames to catch up",
                         skip_frames
-                    )
+                    );
                 }
             }
         }
@@ -904,12 +904,12 @@ impl event::EventHandler<ggez::GameError> for PpanState {
         }
 
         for handle in sess.local_player_handles() {
-            self.handlers[0].input_handler.tick(_ctx).unwrap();
+            self.handlers[0].input_handler.tick(ctx);
             sess.add_local_input(handle, self.handlers[0].input_handler.snapshot())
                 .unwrap();
         }
         let targetfps = 60;
-        if !ggez::timer::check_update_time(_ctx, targetfps) {
+        if !ggez::timer::check_update_time(ctx, targetfps) {
             log("frame | skipped");
             return Ok(());
         }
@@ -999,15 +999,15 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                 // }
 
                                 // find paddle where id is i
-                                let paddle = &mut self
+                                let paddle = self
                                     .table
                                     .paddles
                                     .iter_mut()
                                     .find(|p| p.id as usize == i)
                                     .unwrap();
-                                handler.tick(_ctx).unwrap();
+                                handler.tick(ctx);
                                 // input handling
-                                compute(&handler, paddle, delta_time)
+                                compute(&handler, paddle, delta_time);
                             }
                         }
                     }
@@ -1159,10 +1159,10 @@ impl event::EventHandler<ggez::GameError> for PpanState {
         &mut self,
         _ctx: &mut Context,
         keycode: KeyCode,
-        _keymods: event::KeyMods,
+        keymods: event::KeyMods,
         _repeat: bool,
     ) {
-        self.egui.input.key_down_event(keycode, _keymods)
+        self.egui.input.key_down_event(keycode, keymods);
     }
 
     fn text_input_event(&mut self, _ctx: &mut Context, character: char) {
@@ -1187,7 +1187,7 @@ fn main() -> GameResult {
     // set fullscreen
     ggez::graphics::set_fullscreen(&mut ctx, ggez::conf::FullscreenType::Windowed)?;
 
-    let state: PpanState = PpanState::new(sess, local_port == 7102)?;
+    let state: PpanState = PpanState::new(sess, local_port == 7102);
 
     event::run(ctx, event_loop, state)
 }

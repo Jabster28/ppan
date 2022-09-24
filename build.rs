@@ -12,8 +12,8 @@ fn main() {
             .unwrap()
             .trim()
             .to_string(),
-        Err(_) => {
-            eprintln!("Failed to get git tag");
+        Err(e) => {
+            eprintln!("Failed to get git tag: {}", e);
             exit(1);
         }
     };
