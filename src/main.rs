@@ -1,13 +1,24 @@
-use std::io::prelude::*;
+#![feature(thread_is_running)]
+pub mod compute;
+
+use local_ip_address::local_ip;
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use std::fs::OpenOptions;
-use std::mem::{swap, take};
-use std::net::SocketAddr;
-use std::sync::mpsc;
+use std::io::prelude::*;
+use std::mem::{swap, take, MaybeUninit};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4, UdpSocket};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{mpsc, Arc};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
 use ggez_egui::egui::ProgressBar;
 
+use bincode::{deserialize, serialize};
+use derive_new::new;
+use ggez::event::{self, KeyCode};
+use ggez::graphics::{self, Color, Rect};
+use ggez::input::keyboard;
 use ggez_egui::{egui, EguiBackend};
 use ggrs::{
     Config,
@@ -18,20 +29,97 @@ use ggrs::{
     SessionState,
     UdpNonBlockingSocket,
 };
-
-use derive_new::new;
-use ggez::event::{self, KeyCode};
-use ggez::graphics::{self, Color, Rect};
-use ggez::input::keyboard;
 // use ggez::mint::Point2;
 use ggez::{Context, GameResult};
 use glam::*;
-mod input_handlers;
 use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
 
-use crate::input_handlers::NetworkInputHandler;
+use input_handlers::NetworkInputHandler;
+use serde::{Deserialize, Serialize};
+use std::io;
+
+#[derive(Serialize, Deserialize, PartialEq, Debug)]
+struct ShareData {
+    hostname: String,
+    port: u16,
+    ip: String,
+    version: String,
+}
+enum MultiplayerMode {
+    LocalClient,
+    LocalHost,
+    LocalMode,
+    Server,
+    Manual,
+    None,
+}
+use lazy_static::lazy_static;
+
+use crate::compute::compute;
 #[derive(Debug)]
 pub struct GGRSConfig;
+
+pub const PORT: u16 = 7101;
+lazy_static! {
+    pub static ref IPV4: IpAddr = Ipv4Addr::new(224, 0, 0, 47).into();
+    pub static ref IPV6: IpAddr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0x0047).into();
+}
+
+// this will be common for all our sockets
+fn new_socket(addr: &SocketAddr) -> io::Result<Socket> {
+    let domain = if addr.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+
+    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
+
+    // we're going to use read timeouts so that we don't hang waiting for packets
+    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
+
+    Ok(socket)
+}
+fn new_sender(addr: &SocketAddr) -> io::Result<Socket> {
+    let socket = new_socket(addr)?;
+
+    if addr.is_ipv4() {
+        socket.bind(&SockAddr::from(SocketAddr::new(
+            Ipv4Addr::new(0, 0, 0, 0).into(),
+            0,
+        )))?;
+    } else {
+        socket.bind(&SockAddr::from(SocketAddr::new(
+            Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).into(),
+            0,
+        )))?;
+    }
+
+    Ok(socket)
+}
+
+fn join_multicast(addr: SocketAddr) -> io::Result<Socket> {
+    let ip_addr = addr.ip();
+
+    let socket = new_socket(&addr)?;
+
+    // depending on the IP protocol we have slightly different work
+    match ip_addr {
+        IpAddr::V4(ref mdns_v4) => {
+            // join to the multicast address, with all interfaces
+            socket.join_multicast_v4(mdns_v4, &Ipv4Addr::new(0, 0, 0, 0))?;
+        }
+        IpAddr::V6(ref mdns_v6) => {
+            // join to the multicast address, with all interfaces (ipv6 uses indexes not addresses)
+            socket.join_multicast_v6(mdns_v6, 0)?;
+            socket.set_only_v6(true)?;
+        }
+    };
+
+    // bind us to the socket address.
+    socket.bind(&SockAddr::from(addr))?;
+    Ok(socket)
+}
 
 impl Config for GGRSConfig {
     // Clone
@@ -40,12 +128,13 @@ impl Config for GGRSConfig {
     // Copy + Clone + PartialEq + bytemuck::Pod + bytemuck::Zeroable
     type State = TableState; // Clone + PartialEq + Eq + Hash
 }
-
 struct Player {
     addr: PlayerType<SocketAddr>,
     txt: String,
 }
 struct PpanState {
+    mcast: Arc<AtomicBool>,
+    mcastthread: Option<thread::JoinHandle<()>>,
     table: TableState,
     egui: EguiBackend,
     ui: UiState,
@@ -58,6 +147,7 @@ struct PpanState {
     reversed_table: bool,
     players: Vec<Player>,
     tx: mpsc::Sender<String>,
+    mode: MultiplayerMode,
 }
 
 struct UiState {
@@ -72,7 +162,7 @@ struct DebugState {
     show_playarea: bool,
 }
 #[derive(new, Clone)]
-struct Paddle {
+pub struct Paddle {
     id: u16,
     x: f32,
     left: bool,
@@ -151,6 +241,9 @@ impl PpanState {
             }
         });
         let s = PpanState {
+            mcast: Arc::new(AtomicBool::new(false)),
+            mcastthread: None,
+            mode: MultiplayerMode::None,
             tx: tx.clone(),
             table: TableState {
                 paddles: vec![
@@ -285,92 +378,308 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     self.handlers[1].input_handler.is_up()
                 ));
                 ui.end_row();
+                let _ = match &self.mode {
+                    MultiplayerMode::Manual => {
+                        if ui.button("add player").clicked() {
+                            self.players.push(Player {
+                                addr: PlayerType::Local,
+                                txt: "me".to_string(),
+                            });
+                        }
+                        ui.end_row();
+                        if self.network_session.is_none() {
+                            for player in self.players.iter_mut() {
+                                ui.label(format!(
+                                    "player type: {}",
+                                    match player.addr {
+                                        PlayerType::Local => "local",
+                                        PlayerType::Remote(_) => "remote",
+                                        PlayerType::Spectator(_) => "spectator",
+                                    },
+                                    // match player.addr {
+                                    //     PlayerType::Local =>
+                                    //         "localhost".to_string(),
+                                    //     PlayerType::Remote(addr) =>
+                                    //         addr.to_string(),
+                                    //     PlayerType::Spectator(addr) =>
+                                    //         addr.to_string(),
+                                    // }
+                                ));
+                                let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
+                                if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter)
+                                {
+                                    let socketaddr: Option<SocketAddr> = match player.txt.parse() {
+                                        Ok(addr) => Some(addr),
+                                        Err(_) => None,
+                                    };
 
-                if ui.button("add player").clicked() {
-                    self.players.push(Player {
-                        addr: PlayerType::Local,
-                        txt: "me".to_string(),
-                    });
-                }
-                ui.end_row();
-                if self.network_session.is_none() {
-                    for player in self.players.iter_mut() {
-                        ui.label(format!(
-                            "player type: {}",
-                            match player.addr {
-                                PlayerType::Local => "local",
-                                PlayerType::Remote(_) => "remote",
-                                PlayerType::Spectator(_) => "spectator",
-                            },
-                            // match player.addr {
-                            //     PlayerType::Local =>
-                            //         "localhost".to_string(),
-                            //     PlayerType::Remote(addr) =>
-                            //         addr.to_string(),
-                            //     PlayerType::Spectator(addr) =>
-                            //         addr.to_string(),
-                            // }
-                        ));
-                        let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
-                        if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter) {
-                            let socketaddr: Option<SocketAddr> = match player.txt.parse() {
-                                Ok(addr) => Some(addr),
-                                Err(_) => None,
-                            };
-
-                            if socketaddr.is_none() {
-                                println!("invalid address");
-                                player.txt = match player.addr {
-                                    PlayerType::Local => "me".to_string(),
-                                    PlayerType::Remote(addr) => addr.to_string(),
-                                    PlayerType::Spectator(addr) => addr.to_string(),
-                                };
-                                return;
-                            } else {
-                                println!("new address: {}", socketaddr.unwrap());
-                                player.addr = PlayerType::Remote(socketaddr.unwrap());
+                                    if socketaddr.is_none() {
+                                        println!("invalid address");
+                                        player.txt = match player.addr {
+                                            PlayerType::Local => "me".to_string(),
+                                            PlayerType::Remote(addr) => addr.to_string(),
+                                            PlayerType::Spectator(addr) => addr.to_string(),
+                                        };
+                                        return;
+                                    } else {
+                                        println!("new address: {}", socketaddr.unwrap());
+                                        player.addr = PlayerType::Remote(socketaddr.unwrap());
+                                    }
+                                }
+                                ui.end_row();
                             }
+
+                            if ui.button("start").clicked() {
+                                println!("clicked");
+                                // TODO: figure out a way to mess with ownership so that this works
+                                self.players.iter_mut().enumerate().for_each(|(i, player)| {
+                                    let mut sb: SessionBuilder<GGRSConfig> = SessionBuilder::new();
+                                    swap(&mut self.sess_builder, &mut sb);
+                                    self.sess_builder = sb
+                                        .add_player(
+                                            match player.addr {
+                                                PlayerType::Local => PlayerType::Local,
+                                                PlayerType::Remote(addr) => {
+                                                    PlayerType::Remote(addr)
+                                                }
+                                                PlayerType::Spectator(addr) => {
+                                                    PlayerType::Spectator(addr)
+                                                }
+                                            },
+                                            i,
+                                        )
+                                        .unwrap();
+                                });
+                                self.network_session = Some(
+                                    take(&mut self.sess_builder)
+                                        .with_num_players(self.players.len())
+                                        .with_sparse_saving_mode(true)
+                                        .start_p2p_session(
+                                            UdpNonBlockingSocket::bind_to_port(
+                                                if self.reversed_table { 7102 } else { 7101 },
+                                            )
+                                            .unwrap(),
+                                        )
+                                        .unwrap(),
+                                );
+                                println!("started");
+                            }
+                            if ui.button("back").clicked() {
+                                self.mode = MultiplayerMode::None;
+                                self.network_session = None;
+                                self.players = vec![];
+                                return;
+                            }
+                        }
+                    }
+                    MultiplayerMode::LocalMode => {
+                        if ui.button("join").clicked() {
+                            self.mode = MultiplayerMode::LocalClient;
+                        }
+                        if ui.button("host").clicked() {
+                            self.mode = MultiplayerMode::LocalHost;
+                        }
+                    }
+                    MultiplayerMode::Server => todo!(),
+                    MultiplayerMode::None => {
+                        if ui.button("manual").clicked() {
+                            self.mode = MultiplayerMode::Manual;
+                        }
+                        if ui.button("local").clicked() {
+                            self.mode = MultiplayerMode::LocalMode;
+                        }
+                        if ui.button("server").clicked() {
+                            self.mode = MultiplayerMode::Server;
                         }
                         ui.end_row();
                     }
 
-                    if ui.button("start").clicked() {
-                        println!("clicked");
-                        // TODO: figure out a way to mess with ownership so that this works
-                        self.players.iter_mut().enumerate().for_each(|(i, player)| {
-                            let mut sb: SessionBuilder<GGRSConfig> = SessionBuilder::new();
-                            swap(&mut self.sess_builder, &mut sb);
-                            self.sess_builder = sb
-                                .add_player(
-                                    match player.addr {
-                                        PlayerType::Local => PlayerType::Local,
-                                        PlayerType::Remote(addr) => PlayerType::Remote(addr),
-                                        PlayerType::Spectator(addr) => PlayerType::Spectator(addr),
-                                    },
-                                    i,
-                                )
-                                .unwrap();
-                        });
-                        self.network_session =
-                            Some(
-                                take(&mut self.sess_builder)
-                                    .with_num_players(self.players.len())
-                                    .with_sparse_saving_mode(true)
-                                    .start_p2p_session(
-                                        UdpNonBlockingSocket::bind_to_port(
-                                            if self.reversed_table { 7002 } else { 7001 },
-                                        )
-                                        .unwrap(),
-                                    )
-                                    .unwrap(),
-                            );
-                        println!("started");
-                    }
-                }
+                    MultiplayerMode::LocalHost => {
+                        // hehe, localhost
+                        let name = "main";
+                        let addr = *IPV4;
+                        let addr = SocketAddr::new(addr, PORT);
+                        let multicasting = Arc::clone(&self.mcast);
+                        if ui.button("back").clicked() {
+                            self.mode = MultiplayerMode::None;
+                            self.network_session = None;
+                            self.players = vec![];
+                            multicasting.store(false, Ordering::Relaxed);
+                            return;
+                        }
 
-                if ui.button("quit").clicked() {
-                    std::process::exit(0);
-                }
+                        if self.mcast.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        multicasting.store(true, Ordering::Relaxed);
+                        let thread_multicasting = Arc::clone(&self.mcast);
+
+                        let thread =
+                            std::thread::Builder::new()
+                                .name(format!("{}", ""))
+                                .spawn(move || {
+                                    let name = "host";
+                                    // socket creation will go here...
+
+                                    // We'll be looping until the client indicates it is done.
+                                    let listener = join_multicast(addr).unwrap();
+                                    // test receive and response code will go here...
+                                    let mut buf: [MaybeUninit<u8>; 64] =
+                                        [MaybeUninit::<u8>::uninit(); 64];
+
+                                    while thread_multicasting.load(Ordering::Relaxed) {
+                                        // we're assuming failures were timeouts, the client_done loop will stop us
+                                        match listener.recv_from(&mut buf) {
+                                            Ok((len, remote_addr)) => {
+                                                let data = &buf[..len];
+                                                unsafe {
+                                                    let data = data
+                                                        .iter()
+                                                        .map(|x| x.assume_init())
+                                                        .collect::<Vec<u8>>();
+                                                    let data = data.as_slice();
+
+                                                    println!(
+                                                        "{}: got data: {} from: {:?}",
+                                                        name,
+                                                        String::from_utf8_lossy(data),
+                                                        remote_addr
+                                                    );
+                                                }
+
+                                                // create a socket to send the response
+                                                let responder =
+                                                    new_socket(&remote_addr.as_socket().unwrap())
+                                                        .expect("failed to create responder");
+
+                                                // we send the response that was set at the method beginning
+                                                responder
+                                                    .send_to(name.as_bytes(), &remote_addr)
+                                                    .expect("failed to respond");
+
+                                                println!(
+                                                    "{}: sent response to: {:?}",
+                                                    name, remote_addr
+                                                );
+                                            }
+                                            Err(err) => {
+                                                match err.kind() {
+                                                    // we're assuming failures were timeouts, the client_done loop will stop us
+                                                    std::io::ErrorKind::TimedOut => {}
+                                                    std::io::ErrorKind::WouldBlock => {}
+                                                    _ => {
+                                                        panic!("{}: error: {}", name, err);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    println!("{}: quitting", name);
+                                });
+                        self.mcastthread = Some(thread.unwrap());
+
+                        println!("{}: joined: {}", name, addr);
+                    }
+
+                    MultiplayerMode::LocalClient => {
+                        let name = "main";
+                        let addr = *IPV4;
+                        let addr = SocketAddr::new(addr, PORT);
+                        let multicasting = Arc::clone(&self.mcast);
+                        if ui.button("back").clicked() {
+                            self.mode = MultiplayerMode::None;
+                            self.network_session = None;
+                            self.players = vec![];
+                            multicasting.store(false, Ordering::Relaxed);
+                            return;
+                        }
+                        if ui.button("refresh").clicked() {
+                            multicasting.store(false, Ordering::Relaxed);
+                            // wait for the thread to stop
+                            while multicasting.load(Ordering::Relaxed) {}
+                            return;
+                        }
+                        if self.mcast.load(Ordering::Relaxed) {
+                            return;
+                        }
+                        multicasting.store(true, Ordering::Relaxed);
+                        let thread_multicasting = Arc::clone(&self.mcast);
+
+                        let thread =
+                            std::thread::Builder::new()
+                                .name(format!("{}", ""))
+                                .spawn(move || {
+                                    let name = "client";
+                                    // socket creation will go here...
+
+                                    // We'll be looping until the client indicates it is done.
+                                    let listener = join_multicast(addr).unwrap();
+                                    // test receive and response code will go here...
+                                    let mut buf: [MaybeUninit<u8>; 64] =
+                                        [MaybeUninit::<u8>::uninit(); 64];
+
+                                    while thread_multicasting.load(Ordering::Relaxed) {
+                                        // we're assuming failures were timeouts, the client_done loop will stop us
+                                        match listener.recv_from(&mut buf) {
+                                            Ok((len, remote_addr)) => {
+                                                let data = &buf[..len];
+                                                unsafe {
+                                                    let data = data
+                                                        .iter()
+                                                        .map(|x| x.assume_init())
+                                                        .collect::<Vec<u8>>();
+                                                    let data = data.as_slice();
+
+                                                    println!(
+                                                        "{}: got data: {} from: {:?}",
+                                                        name,
+                                                        String::from_utf8_lossy(data),
+                                                        remote_addr
+                                                    );
+                                                }
+                                            }
+                                            Err(err) => {
+                                                match err.kind() {
+                                                    // we're assuming failures were timeouts, the client_done loop will stop us
+                                                    std::io::ErrorKind::TimedOut => {}
+                                                    std::io::ErrorKind::WouldBlock => {}
+                                                    _ => {
+                                                        panic!("{}: error: {}", name, err);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+
+                                    println!("{}: quitting", name);
+                                });
+                        self.mcastthread = Some(thread.unwrap());
+
+                        println!("{}: joined: {}", name, addr);
+                        let data = ShareData {
+                            hostname: hostname::get()
+                                .unwrap_or("Player".into())
+                                .to_str()
+                                .unwrap()
+                                .to_string(),
+                            port: 7101,
+                            ip: local_ip().unwrap().to_string(),
+                            version: env!("CURRENT_TAG").to_string(),
+                        };
+                        let data = bincode::serialize(&data).unwrap();
+                        let data = data.as_slice();
+                        let message = format!("{}", env!("CURRENT_TAG")).into_bytes();
+                        let message = message.as_slice();
+
+                        // create the sending socket
+                        let socket = new_sender(&addr).expect("could not create sender!");
+                        socket
+                            .send_to(data, &SockAddr::from(SocketAddr::new(*IPV4, 7101)))
+                            .expect("could not send_to!");
+                    }
+                };
+
                 if self.network_session.is_some()
                     && self
                         .network_session
@@ -431,11 +740,13 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                     ui.label("no network session active");
                 }
                 ui.checkbox(&mut self.ui.debug.show_playarea, "show playarea");
+                if ui.button("quit").clicked() {
+                    std::process::exit(0);
+                }
 
                 // ui.allocate_space(ui.available_size());
             });
 
-        let rot_accel = 0.8;
         // let targetfps = 6000;
 
         if keyboard::is_key_pressed(_ctx, KeyCode::Q) {
@@ -605,245 +916,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
                                     .unwrap();
                                 handler.tick(_ctx).unwrap();
                                 // input handling
-
-                                if handler.is_right() {
-                                    paddle.velocity_x += paddle.acceleration;
-                                    // cap velocity to 1500
-                                    if paddle.velocity_x > 1500.0 {
-                                        paddle.velocity_x = 1500.0;
-                                    }
-                                }
-                                if handler.is_left() {
-                                    paddle.velocity_x -= paddle.acceleration;
-                                    // cap velocity to -1500
-                                    if paddle.velocity_x < -1500.0 {
-                                        paddle.velocity_x = -1500.0;
-                                    }
-                                }
-                                if handler.is_up() {
-                                    paddle.velocity_y -= paddle.acceleration;
-                                    // cap velocity to -1500
-                                    if paddle.velocity_y < -1500.0 {
-                                        paddle.velocity_y = -1500.0;
-                                    }
-                                }
-                                if handler.is_down() {
-                                    paddle.velocity_y += paddle.acceleration;
-                                    // cap velocity to 1500
-                                    if paddle.velocity_y > 1500.0 {
-                                        paddle.velocity_y = 1500.0;
-                                    }
-                                }
-
-                                if paddle.going_acw
-                                    && (paddle.rotation - paddle.next_stop).abs() < 30.0
-                                {
-                                    paddle.going_acw = false;
-                                } else if paddle.going_cw
-                                    && (paddle.rotation - paddle.next_stop).abs() < 30.0
-                                {
-                                    paddle.going_cw = false;
-                                }
-                                if paddle.going_cw && paddle.going_acw {
-                                    // only keep cw
-                                    paddle.going_acw = false;
-                                }
-
-                                if handler.is_rotating_acw() {
-                                    paddle.going_acw = true;
-                                    // get next 90 degree rotation to the left
-                                    paddle.next_stop =
-                                        (90.0 * (paddle.rotation / 90.0).floor()) as f32;
-                                    if paddle.next_stop == paddle.rotation {
-                                        paddle.next_stop -= 90.0
-                                    }
-                                    while paddle.next_stop < 0.0 {
-                                        paddle.next_stop += 360.0;
-                                    }
-                                    paddle.next_stop %= 360.0;
-                                }
-
-                                if handler.is_rotating_cw() {
-                                    paddle.going_cw = true;
-                                    // get next 90 degree rotation to the right
-                                    paddle.next_stop =
-                                        (90.0 * (paddle.rotation / 90.0).ceil()) as f32;
-                                    if paddle.next_stop == paddle.rotation {
-                                        paddle.next_stop += 90.0
-                                    }
-                                    paddle.next_stop %= 360.0;
-                                }
-
-                                // calculations
-                                let mut initial_velocity = 0.0;
-
-                                if (paddle.next_stop - paddle.rotation).abs() > 0.5 {
-                                    while paddle.rotation < 0.0 {
-                                        paddle.rotation += 360.0;
-                                    }
-                                    paddle.rotation %= 360.0;
-
-                                    // first, calculate clockwise and anticlockwise rotations
-                                    let mut first_displacement = paddle.next_stop - paddle.rotation;
-                                    let mut second_displacement =
-                                        paddle.next_stop - paddle.rotation - 180.0;
-                                    // lmk if they're both positive or negative
-                                    if (first_displacement > 0.0 && second_displacement > 0.0)
-                                        || (first_displacement < 0.0 && second_displacement < 0.0)
-                                    {
-                                        println!("woah there, that's a lot of rotation");
-                                    }
-                                    // if our current rotation is greater than the next stop, we need to add 360 to both displacements
-                                    if first_displacement < 0.0 && second_displacement < 0.0 {
-                                        while first_displacement < 0.0 && second_displacement < 0.0
-                                        {
-                                            first_displacement += 180.0;
-                                            second_displacement += 180.0;
-                                        }
-                                    }
-                                    if first_displacement > 0.0 && second_displacement > 0.0 {
-                                        while first_displacement > 0.0 && second_displacement > 0.0
-                                        {
-                                            first_displacement -= 180.0;
-                                            second_displacement -= 180.0;
-                                        }
-                                    }
-                                    // cw will always be positive, acw will always be negative
-
-                                    //  if the paddle's attempted rotation is left, its rotational velocity should decrease as it reaches the next 90 degree mark
-                                    // we'll use v^2 = u^2 + 2as to figure out the "initial" velocity, since we know the final velocity is 0 and acceleration is 10, and the displacement is just the rotation's distance from the nearest 90 degree mark
-                                    // we'll calculate two velocities, one for the rotation to the left and one for the rotation to the right
-                                    // and we'll use the one that is shortest
-                                    let initial_velocity_squared_first =
-                                        -(0.0 - 2.0 * rot_accel * first_displacement) % 360.0;
-                                    let initial_velocity_squared_second =
-                                        -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
-
-                                    // if they're both positive, something went wrong. log
-                                    if initial_velocity_squared_first > 0.0
-                                        && initial_velocity_squared_second > 0.0
-                                    {
-                                        println!("the fuck?");
-                                    }
-
-                                    let init_vel_sq_cw = if initial_velocity_squared_first
-                                        > initial_velocity_squared_second
-                                    {
-                                        initial_velocity_squared_first
-                                    } else {
-                                        initial_velocity_squared_second
-                                    };
-                                    let init_vel_sq_acw = if initial_velocity_squared_first
-                                        > initial_velocity_squared_second
-                                    {
-                                        initial_velocity_squared_second
-                                    } else {
-                                        initial_velocity_squared_first
-                                    };
-                                    println!(
-                                        "so if we're going clockwise, we'll need a velocity of \
-                                         {:?}, but if we're going anticlockwise, we'd need a \
-                                         velocity of {:?}",
-                                        init_vel_sq_cw.sqrt(),
-                                        -(init_vel_sq_acw.abs().sqrt()),
-                                    );
-                                    // check nan
-                                    if (-init_vel_sq_acw.abs().sqrt()).is_nan()
-                                        || init_vel_sq_cw.sqrt().is_nan()
-                                    {
-                                        println!("one of the velocities is nan");
-                                    }
-                                    let initial_velocity_squared = if paddle.going_acw {
-                                        println!(
-                                            "we need to go left, so we're using anticlockwise"
-                                        );
-                                        init_vel_sq_acw
-                                    } else if paddle.going_cw {
-                                        println!("we need to go right, so we're using clockwise");
-                                        init_vel_sq_cw
-                                    } else {
-                                        // use the shortest one
-                                        println!(
-                                            "we're not aiming anywhere, so we're using the \
-                                             shortest one"
-                                        );
-                                        if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
-                                            println!("using clockwise, {:?}", init_vel_sq_cw);
-                                            init_vel_sq_cw
-                                        } else {
-                                            println!("using anticlockwise, {:?}", init_vel_sq_acw);
-                                            init_vel_sq_acw
-                                        }
-                                    };
-
-                                    initial_velocity = if initial_velocity_squared < 0.0 {
-                                        -(initial_velocity_squared.abs().sqrt())
-                                    } else {
-                                        initial_velocity_squared.sqrt()
-                                    };
-                                } else {
-                                    // if we're really close, just silently snap to the next stop
-                                    // should save us a couple cpu cycles
-                                    paddle.rotation = paddle.next_stop;
-                                }
-                                // println!("initial_velocity: {}", initial_velocity);
-                                paddle.rotation_velocity = initial_velocity;
-
-                                // cap rotation velocity
-                                let max_rotation_velocity = 8.0;
-
-                                if handler.is_rotating_cw() {
-                                    paddle.rotation_velocity += max_rotation_velocity;
-                                }
-                                if handler.is_rotating_acw() {
-                                    paddle.rotation_velocity -= max_rotation_velocity;
-                                }
-
-                                if paddle.rotation_velocity > max_rotation_velocity {
-                                    paddle.rotation_velocity = max_rotation_velocity;
-                                } else if paddle.rotation_velocity < -max_rotation_velocity {
-                                    paddle.rotation_velocity = -max_rotation_velocity;
-                                }
-
-                                paddle.rotation += paddle.rotation_velocity;
-
-                                // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
-                                // println!(
-                                //     "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
-                                //     // pad start to 3 chars
-                                //     paddle.x.round(),
-                                //     paddle.y.round(),
-                                //     paddle.going_acw,
-                                //     paddle.going_cw,
-                                //     paddle.rotation.round(),
-                                //     paddle.rotation_velocity.round(),
-                                //     paddle.next_stop.round(),
-                                //     ggez::timer::fps(_ctx).round()
-                                // );!!
-
-                                // speed calculations
-                                paddle.x += paddle.velocity_x * delta_time;
-                                paddle.velocity_x *= 1.0 - paddle.friction;
-
-                                paddle.y += paddle.velocity_y * delta_time;
-                                paddle.velocity_y *= 1.0 - paddle.friction;
-
-                                // ensure x is in bounds, and reset velocity if it is
-                                if paddle.x < paddle.width / 2.0 {
-                                    paddle.x = paddle.width / 2.0;
-                                    paddle.velocity_x = 0.0;
-                                } else if paddle.x > 800.0 - paddle.width / 2.0 {
-                                    paddle.x = 800.0 - paddle.width / 2.0;
-                                    paddle.velocity_x = 0.0;
-                                }
-                                // 0 > y > 600
-                                if paddle.y < 0.0 {
-                                    paddle.y = 0.0;
-                                    paddle.velocity_y = 0.0;
-                                } else if paddle.y > 600.0 {
-                                    paddle.y = 600.0;
-                                    paddle.velocity_y = 0.0;
-                                }
+                                compute(&handler, paddle, delta_time)
                             }
                         }
                     }
@@ -1008,7 +1081,7 @@ impl event::EventHandler<ggez::GameError> for PpanState {
 }
 
 fn main() -> GameResult {
-    let local_port = 7001;
+    let local_port = 7101;
     let sess = SessionBuilder::<GGRSConfig>::new()
         // .with_num_players(2)
         .with_max_prediction_window(120);
@@ -1024,7 +1097,16 @@ fn main() -> GameResult {
     // set fullscreen
     ggez::graphics::set_fullscreen(&mut ctx, ggez::conf::FullscreenType::Windowed)?;
 
-    let state: PpanState = PpanState::new(sess, local_port == 7002)?;
+    let state: PpanState = PpanState::new(sess, local_port == 7102)?;
 
     event::run(ctx, event_loop, state)
+}
+#[test]
+fn test_ipv4_multicast() {
+    assert!(IPV4.is_multicast());
+}
+
+#[test]
+fn test_ipv6_multicast() {
+    assert!(IPV6.is_multicast());
 }
