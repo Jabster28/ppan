@@ -8,7 +8,7 @@ fn main() {
         .args(&["describe", "--tags", "--abbrev=0", "--always"])
         .output()
     {
-        Ok(output) => str::from_utf8(output.stdout.clone().as_slice())
+        Ok(output) => str::from_utf8(output.stdout.as_slice())
             .unwrap()
             .trim()
             .to_string(),
