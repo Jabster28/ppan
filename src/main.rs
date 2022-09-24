@@ -241,7 +241,14 @@ impl PpanState {
                 .append(true)
                 .create(true)
                 .open("ppan.log")
-                .unwrap();
+                .unwrap_or(
+                    OpenOptions::new()
+                        .write(true)
+                        .append(true)
+                        .create(true)
+                        .open("/tmp/ppan.log")
+                        .unwrap(),
+                );
             loop {
                 // println!("attempting to recv");
                 writeln!(file, "{}", rx.recv().unwrap()).unwrap();
