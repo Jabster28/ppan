@@ -1,11 +1,16 @@
 //! This module contains the input handlers for ppan.
 //!
-//!  Initially while designing the game, the inputs were hard-coded and I had planned to re-use the computation code per player. However, modularising the code was proven to make things easier, and I decided to make a separate module for storing traits of (input handlers)[InputHandler]. This allows for easy re-use of the code, and also allows for easy addition of new input handlers such as controllers, or AI.
+//!  Initially while designing the game, the inputs were hard-coded and I had planned to re-use the computation code per player. However, modularising the code was proven to make things easier, and I decided to make a separate module for storing traits of (input handlers)[`InputHandler`]. This allows for easy re-use of the code, and also allows for easy addition of new input handlers such as controllers, or AI.
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss,
+    clippy::similar_names,
+    clippy::struct_excessive_bools
+)]
 
 use bytemuck::Zeroable;
 use ggez::{input::keyboard, Context};
-use glam::*;
-
+use glam::{bool, u32};
 /// A trait that can store the current inputs of a player and update them.
 ///
 /// This abstracts away the input method, so that the same code can be used for real players, AI, and networked players.
@@ -26,8 +31,9 @@ pub trait InputHandler {
     ///
     /// This is where the main logic for the input handler should go. This should almost always be deterministic, to ensure that players don't get different game states.
     ///
-    /// # Example:
-    /// ```ignore
+    /// # Example
+    /// ```compile_fail
+    /// # // i know the line above isn't technically right but i seriously don't care enough to change it
     /// use input_handlers::*;
     ///
     /// for i in players.iter_mut() {
@@ -35,12 +41,13 @@ pub trait InputHandler {
     ///     player.tick(&mut ctx).unwrap();
     ///     // now we can do game logic!
     /// }
-    fn tick(&mut self, ctx: &mut Context) -> Result<(), String>;
+    /// ```
+    fn tick(&mut self, ctx: &mut Context);
     /// Returns a readonly copy of the state of the input handler.
     ///
     /// Useful for situations where you'd want to save the state of the game, perhaps in replays or for networking.
     ///
-    /// # Example:
+    /// # Example
     /// ```
     /// use input_handlers::*;
     ///
@@ -65,7 +72,7 @@ pub trait InputHandler {
 ///
 /// Could also be used for disconnected players, although that should probably be handled by the game code.
 ///
-/// # Example:
+/// # Example
 /// ```
 /// # fn something_bad_happens_to(thisguy: NetworkInputHandler) -> bool {
 /// #     true
@@ -107,9 +114,7 @@ impl InputHandler for EmptyInputHandler {
         false
     }
 
-    fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
-        Ok(())
-    }
+    fn tick(&mut self, _ctx: &mut Context) {}
 
     fn snapshot(&self) -> u8 {
         0
@@ -119,7 +124,7 @@ impl InputHandler for EmptyInputHandler {
 
 /// Input handler that takes input from the keyboard.
 ///
-/// Provides a way of checking multiple [ggez keyboard](ggez::input::keyboard) KeyCodes.
+/// Provides a way of checking multiple [ggez keyboard](ggez::input::keyboard) `KeyCodes`.
 pub struct KeyboardInputHandler {
     up_key: keyboard::KeyCode,
     down_key: keyboard::KeyCode,
@@ -136,7 +141,8 @@ pub struct KeyboardInputHandler {
 }
 
 impl KeyboardInputHandler {
-    /// Creates a new KeyboardInputHandler.
+    /// Creates a new `KeyboardInputHandler`.
+    #[must_use]
     pub fn new(
         up_key: keyboard::KeyCode,
         down_key: keyboard::KeyCode,
@@ -187,14 +193,13 @@ impl InputHandler for KeyboardInputHandler {
         self.rotating_acw
     }
 
-    fn tick(&mut self, ctx: &mut Context) -> Result<(), String> {
+    fn tick(&mut self, ctx: &mut Context) {
         self.going_up = keyboard::is_key_pressed(ctx, self.up_key);
         self.going_down = keyboard::is_key_pressed(ctx, self.down_key);
         self.going_left = keyboard::is_key_pressed(ctx, self.left_key);
         self.going_right = keyboard::is_key_pressed(ctx, self.right_key);
         self.rotating_cw = keyboard::is_key_pressed(ctx, self.rotate_cw_key);
         self.rotating_acw = keyboard::is_key_pressed(ctx, self.rotate_acw_key);
-        Ok(())
     }
 
     fn snapshot(&self) -> u8 {
@@ -209,6 +214,7 @@ impl InputHandler for KeyboardInputHandler {
         ];
         let mut snapshot: u8 = 0;
         for (i, result) in results.iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
             if *result {
                 snapshot += 2u8.pow(i as u32);
             }
@@ -219,7 +225,8 @@ impl InputHandler for KeyboardInputHandler {
 
 /// An Input handler that takes input from a state snapshot, intended to be used in a network.
 ///
-/// This isn't much different from the EmptyInputHandler, but its new() function takes a snapshot of the input state which makes it a tad more useful.
+/// This isn't much different from the `EmptyInputHandler`, but its new() function takes a snapshot of the input state which makes it a tad more useful.
+#[allow(clippy::struct_excessive_bools)]
 pub struct NetworkInputHandler {
     going_up: bool,
     going_down: bool,
@@ -229,9 +236,10 @@ pub struct NetworkInputHandler {
     pub rotating_acw: bool,
 }
 impl NetworkInputHandler {
-    /// Creates a new NetworkInputHandler from a snapshot.
+    /// Creates a new `NetworkInputHandler` from a snapshot.
     ///
     /// This should be used once the inputs from other players have been received, in order to simulate a traditional input handler.
+    #[must_use]
     pub fn new(state: u8) -> NetworkInputHandler {
         NetworkInputHandler {
             going_up: state % 2 == 1,
@@ -268,9 +276,7 @@ impl InputHandler for NetworkInputHandler {
         self.rotating_acw
     }
 
-    fn tick(&mut self, _ctx: &mut Context) -> Result<(), String> {
-        Ok(())
-    }
+    fn tick(&mut self, _ctx: &mut Context) {}
 
     fn snapshot(&self) -> u8 {
         // so each bit represents a different input
@@ -284,6 +290,7 @@ impl InputHandler for NetworkInputHandler {
         ];
         let mut snapshot: u8 = 0;
         for (i, result) in results.iter().enumerate() {
+            #[allow(clippy::cast_possible_truncation)]
             if *result {
                 snapshot += 2u8.pow(i as u32);
             }
