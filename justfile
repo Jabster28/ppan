@@ -9,6 +9,7 @@ run:
     cargo run --features bevy/dynamic
 
 build:
+    @touch discord_game_sdk/c/discord_game_sdk.h || just discord_sdk
     . ./env.sh && cargo build --release --all-features
 
 # installs butler (only works on linux tho)
@@ -39,8 +40,8 @@ linux:
 
 macos:
     cargo install cargo-bundle
-    cargo bundle --release
-    dylibbundler -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/discord_game_sdk
+    . ./env.sh && cargo bundle --release --all-features
+    . ./env.sh && dylibbundler --search-path $DISCORD_GAME_SDK_PATH/lib/x86_64  -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/libs
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
     cp .itch.toml dist/
     cp -r target/release/bundle/osx/ppan.app dist/

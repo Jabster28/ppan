@@ -121,7 +121,7 @@ fn setup_game(
     ]);
     server_settings.asset_folder =
     // chanegs for each os
-    if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
+    if cfg!(target_os = "windows") || cfg!(target_os = "linux") || cfg!(debug_asdsertions){
         "assets"
     } else if cfg!(target_os = "macos") {
         "../Resources/assets"
