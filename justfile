@@ -91,3 +91,8 @@ discordlinux:
     -echo $LD_LIBRARY_PATH
     cp $(pwd)/discord_game_sdk/lib/x86_64/{,lib}discord_game_sdk.so
     echo "export LD_LIBRARY_PATH=/usr/lib:${LD_LIBRARY_PATH:+${LD_LIBRARY_PATH}:}\$DISCORD_GAME_SDK_PATH/lib/x86_64" | tee -a env.sh
+
+discordmacos:
+    -echo $DYLD_LIBRARY_PATH
+    cp $(pwd)/discord_game_sdk/lib/x86_64/{,lib}discord_game_sdk.dylib
+    echo "export DYLD_LIBRARY_PATH=/usr/lib:${DYLD_LIBRARY_PATH:+${DYLD_LIBRARY_PATH}:}\$DISCORD_GAME_SDK_PATH/lib/x86_64" | tee -a env.sh
