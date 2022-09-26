@@ -7,7 +7,7 @@ default:
   before_script:
     - rustc --version
     - cargo --version
-    - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils lsb-release software-properties-common lld -qq
+    - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils lsb-release software-properties-common llvm clang-11 lld -qq
     - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin || true
     - export PATH="$CI_PROJECT_DIR/.cargo/bin:$PATH"
 
