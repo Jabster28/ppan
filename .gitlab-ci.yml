@@ -58,7 +58,7 @@ test-code:
   artifacts:
     when: always
     paths:
-      - tests/*.xml
+      - tests/*
     reports:
       junit: tests/*.xml
       codequality: tests/gl-code-quality-report.json
