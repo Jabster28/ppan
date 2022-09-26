@@ -20,6 +20,7 @@ butler:
 cleanup:
     rm -rf butler butler.zip 7z.so libc7zip.so
 
+# make a portable build ready for itch.io
 package: build
     rm -rf dist
     mkdir -p dist
@@ -38,6 +39,7 @@ linux:
     -. ./env.sh && copydeps --search-dir $DISCORD_GAME_SDK_PATH/lib/x86_64 target/release/ppan dist/{{arch()}}
 
 
+# you'll need to install dylibbundler (brew install dylibbundler)
 macos:
     cargo install cargo-bundle
     . ./env.sh && cargo bundle --release --all-features
@@ -45,7 +47,6 @@ macos:
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
     cp .itch.toml dist/
     cp -r target/release/bundle/osx/ppan.app dist/
-
 
 # publishes to itch
 publish version arch="64": butler package
@@ -97,3 +98,13 @@ discordmacos:
     -echo $DYLD_LIBRARY_PATH
     cp $(pwd)/discord_game_sdk/lib/x86_64/{,lib}discord_game_sdk.dylib
     echo "export DYLD_LIBRARY_PATH=/usr/lib:${DYLD_LIBRARY_PATH:+${DYLD_LIBRARY_PATH}:}\$DISCORD_GAME_SDK_PATH/lib/x86_64" | tee -a env.sh
+
+# make a installer for people not using the itch.io app
+installer: package
+    just installer{{os()}}
+
+# you'll need to install create-dmg (brew install create-dmg)
+
+installermacos:
+    pkgbuild --component dist/ppan.app dist/ppan.pkg --install-location /Applications
+    create-dmg --volname "ppɒŋ" --hide-extension "ppan.app" --app-drop-link 600 185 --skip-jenkins dist/ppan.dmg dist/ppan.app 
