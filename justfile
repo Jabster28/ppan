@@ -18,7 +18,7 @@ butler:
     ./butler -V
 
 cleanup:
-    rm -rf butler butler.zip 7z.so libc7zip.so
+    sudo rm -rf butler butler.zip 7z.so libc7zip.so AppDir appimage-builder appimage-build discord_game_sdk
 
 # make a portable build ready for itch.io
 package: build
@@ -108,3 +108,18 @@ installer: package
 installermacos:
     pkgbuild --component dist/ppan.app dist/ppan.pkg --install-location /Applications
     create-dmg --volname "ppɒŋ" --hide-extension "ppan.app" --app-drop-link 600 185 --skip-jenkins dist/ppan.dmg dist/ppan.app 
+
+installerlinux:
+    sudo rm -rf AppDir/ appimage-build ppan.AppImage
+    test -f appimage-builder || wget -O appimage-builder https://github.com/AppImageCrafters/appimage-builder/releases/download/v1.0.0-beta.1/appimage-builder-1.0.0-677acbd-x86_64.AppImage
+    chmod +x appimage-builder
+    mkdir -p AppDir/
+    cp -r dist/* AppDir/
+    mkdir -p AppDir/lib/x86_64
+    mv AppDir/x86_64/ AppDir/lib
+    sudo ./appimage-builder
+    mv ppan-latest-x86_64.AppImage ppan.AppImage
+    -sudo chown -R $USER:$USER ppan.AppImage AppDir appimage-build
+    chmod +x ppan.AppImage
+    mv ppan.AppImage dist/ppan.AppImage
+    rm -rf AppDir/ appimage-build

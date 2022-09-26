@@ -1,0 +1,23 @@
+# appimage-builder recipe see https://appimage-builder.readthedocs.io for details
+version: 1
+AppDir:
+  path: ./ppan/AppDir
+  app_info:
+    id: io.ppan
+    name: ppan
+    icon: application-vnd.appimage
+    version: latest
+    exec: ppan.x86_64
+    exec_args: $@
+  files:
+    include:
+    - /lib64/ld-linux-x86-64.so.2
+    exclude:
+    - usr/share/man
+    - usr/share/doc/*/README.*
+    - usr/share/doc/*/changelog.*
+    - usr/share/doc/*/NEWS.*
+    - usr/share/doc/*/TODO.*
+AppImage:
+  arch: x86_64
+  update-information: guess
