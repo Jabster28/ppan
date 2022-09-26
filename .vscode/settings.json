@@ -2,5 +2,8 @@
   "discord.enabled": true,
   "cSpell.words": [
     "ppan"
+  ],
+  "rust-analyzer.cargo.features": [
+    "bevy/dynamic"
   ]
 }

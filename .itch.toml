@@ -1,0 +1,20 @@
+[[actions]]
+name = "play"
+path = "ppan.exe"
+platform = "windows"
+scope = "profile:me"
+sandbox = true
+
+[[actions]]
+name = "play"
+path = "ppan.app"
+platform = "osx"
+scope = "profile:me"
+sandbox = true
+
+[[actions]]
+name = "play"
+path = "ppan"
+platform = "linux"
+scope = "profile:me"
+sandbox = true

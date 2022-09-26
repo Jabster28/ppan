@@ -13,10 +13,10 @@ fi
 
 # Set the libpath and pick the proper binary
 if [ "$ARCH" == "x86_64" ]; then
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"`dirname "$0"`"/x86_64/
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"`dirname "."`"/x86_64/
     echo $LD_LIBRARY_PATH
     ./ppan.x86_64 $@
 else
-    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"`dirname "$0"`"/x86/
+    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:"`dirname "."`"/x86/
     ./ppan.x86 $@
 fi

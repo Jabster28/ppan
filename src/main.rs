@@ -1,1214 +1,503 @@
-#![feature(test)]
-#![allow(
-    clippy::cast_possible_truncation,
-    clippy::cast_sign_loss,
-    clippy::similar_names
-)]
-pub mod compute;
+use bevy::prelude::*;
+use bevy_inspector_egui::Inspectable;
+#[cfg(feature = "discord")]
+use discord_game_sdk::Discord;
+// mod input_handlers;
+use leafwing_input_manager::prelude::*;
 
-use local_ip_address::local_ip;
-use socket2::{Domain, Protocol, SockAddr, Socket, Type};
-use std::fs::OpenOptions;
-use std::io::prelude::*;
-use std::mem::{swap, take, MaybeUninit};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
-use std::thread;
-use std::time::{Duration, Instant, SystemTime};
-
-use ggez_egui::egui::ProgressBar;
-
-use derive_new::new;
-use ggez::event::{self, KeyCode};
-use ggez::graphics::{self, Color, Rect};
-use ggez::input::keyboard;
-use ggez_egui::{egui, EguiBackend};
-use ggrs::{
-    Config,
-    GGRSEvent,
-    P2PSession,
-    PlayerType,
-    SessionBuilder,
-    SessionState,
-    UdpNonBlockingSocket,
-};
-// use ggez::mint::Point2;
-use ggez::{Context, GameResult};
-use glam::{bool, f32, u32, Vec2};
-use input_handlers::{EmptyInputHandler, InputHandler, KeyboardInputHandler};
-
-use input_handlers::NetworkInputHandler;
-use serde::{Deserialize, Serialize};
-use std::io;
-
-#[derive(Serialize, Deserialize, PartialEq, Debug)]
-struct ShareData {
-    hostname: String,
-    port: u16,
-    ip: String,
-    version: String,
-    hosting: bool,
+#[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
+enum Action {
+    Left,
+    Right,
+    Up,
+    Down,
+    RotateClockwise,
+    RotateAntiClockwise,
 }
 
-enum MultiplayerMode {
-    LocalClient,
-    LocalHost,
-    LocalMode,
-    Server,
-    Manual,
-    None,
-}
-use lazy_static::lazy_static;
-
-use crate::compute::compute;
-#[derive(Debug)]
-pub struct GGRSConfig;
-
-pub const PORT: u16 = 7101;
-lazy_static! {
-    pub static ref IPV4: IpAddr = Ipv4Addr::new(224, 0, 0, 47).into();
-    pub static ref IPV6: IpAddr = Ipv6Addr::new(0xFF02, 0, 0, 0, 0, 0, 0, 0x0047).into();
+use bevy_asset::{AssetServer, AssetServerSettings, Handle};
+#[cfg(debug_assertions)]
+use bevy_editor_pls::prelude::*;
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum Bindings {
+    Hotkeys(HotkeysInput),
+    Movement(MovementInput),
+    Camera(CameraInput),
 }
 
-// this will be common for all our sockets
-fn new_socket(addr: &SocketAddr) -> io::Result<Socket> {
-    let domain = if addr.is_ipv4() {
-        Domain::IPV4
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum MovementInput {
+    Forward,
+    Right,
+    Up,
+}
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum CameraInput {
+    Yaw,
+    Pitch,
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy)]
+enum HotkeysInput {
+    Test,
+}
+
+#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+enum AppState {
+    MainMenu,
+    InGame,
+    Paused,
+}
+#[cfg(feature = "discord")]
+
+struct DiscordState<'a>(Discord<'a, ()>);
+
+#[derive(PartialEq, Inspectable)]
+
+enum RotatingM {
+    Clockwise,
+    AntiClockwise,
+    Neither,
+}
+#[derive(Component)]
+struct Paddle;
+
+#[derive(Inspectable, Component)]
+struct RotationVelocity(f32);
+
+#[derive(Inspectable, Component)]
+struct Velocity(f32, f32);
+
+#[derive(Inspectable, Component)]
+struct Acceleration(f32);
+
+#[derive(Inspectable, Component)]
+struct NextStop(f32);
+
+#[derive(Inspectable, Component)]
+struct Rotating(RotatingM);
+
+#[derive(Bundle)]
+struct PaddleBundle {
+    rotation_velocity: RotationVelocity,
+    velocity: Velocity,
+    acceleration: Acceleration,
+    next_stop: NextStop,
+    rotating: Rotating,
+    #[bundle]
+    sprite: SpriteBundle,
+}
+
+fn main() {
+    let mut app = App::new();
+    app.add_plugins(DefaultPlugins)
+        .add_plugin(InputManagerPlugin::<Action>::default())
+        .add_state(AppState::MainMenu)
+        .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
+        .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement));
+    // .add_plugin(WorldInspectorPlugin::new())
+    #[cfg(feature = "discord")]
+    app.add_startup_system(setup_discord.exclusive_system())
+        .add_system(discord_update);
+    #[cfg(debug_assertions)]
+    app.add_plugin(EditorPlugin);
+
+    app.run();
+}
+fn setup_game(
+    mut commands: Commands,
+    _meshes: ResMut<Assets<Mesh>>,
+    _materials: ResMut<Assets<ColorMaterial>>,
+    server: Res<AssetServer>,
+    mut server_settings: ResMut<AssetServerSettings>,
+) {
+    let default_map = InputMap::new([
+        (KeyCode::A, Action::Left),
+        (KeyCode::D, Action::Right),
+        (KeyCode::W, Action::Up),
+        (KeyCode::S, Action::Down),
+        (KeyCode::C, Action::RotateAntiClockwise),
+        (KeyCode::V, Action::RotateClockwise),
+    ]);
+    server_settings.asset_folder =
+    // chanegs for each os
+    if cfg!(target_os = "windows") || cfg!(target_os = "linux") {
+        "assets"
+    } else if cfg!(target_os = "macos") {
+        "../Resources/assets"
     } else {
-        Domain::IPV6
-    };
+        panic!("unsupported os")
+    }.to_string();
+    let font: Handle<Font> = server.load("Blazma/Blazma-Regular.ttf");
 
-    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))?;
-
-    // we're going to use read timeouts so that we don't hang waiting for packets
-    socket.set_read_timeout(Some(Duration::from_millis(100)))?;
-
-    Ok(socket)
-}
-
-// fn new_sender(addr: &SocketAddr) -> io::Result<Socket> {
-//     let socket = new_socket(addr)?;
-
-//     if addr.is_ipv4() {
-//         socket.bind(&SockAddr::from(SocketAddr::new(
-//             Ipv4Addr::new(0, 0, 0, 0).into(),
-//             0,
-//         )))?;
-//     } else {
-//         socket.bind(&SockAddr::from(SocketAddr::new(
-//             Ipv6Addr::new(0, 0, 0, 0, 0, 0, 0, 0).into(),
-//             0,
-//         )))?;
-//     }
-
-//     Ok(socket)
-// }
-
-fn join_multicast(addr: SocketAddr) -> io::Result<Socket> {
-    let ip_addr = addr.ip();
-
-    let socket = new_socket(&addr)?;
-
-    // depending on the IP protocol we have slightly different work
-    match ip_addr {
-        IpAddr::V4(ref mdns_v4) => {
-            // join to the multicast address, with all interfaces
-            socket.join_multicast_v4(mdns_v4, &Ipv4Addr::new(0, 0, 0, 0))?;
-        }
-        IpAddr::V6(ref mdns_v6) => {
-            // join to the multicast address, with all interfaces (ipv6 uses indexes not addresses)
-            socket.join_multicast_v6(mdns_v6, 0)?;
-            socket.set_only_v6(true)?;
-        }
-    };
-
-    // bind us to the socket address.
-    socket.bind(&SockAddr::from(addr))?;
-    Ok(socket)
-}
-
-impl Config for GGRSConfig {
-    // Clone
-    type Address = SocketAddr;
-    type Input = u8;
-    // Copy + Clone + PartialEq + bytemuck::Pod + bytemuck::Zeroable
-    type State = TableState; // Clone + PartialEq + Eq + Hash
-}
-struct Player {
-    addr: PlayerType<SocketAddr>,
-    txt: String,
-}
-struct PpanState {
-    mcast: Arc<AtomicBool>,
-    mcastthread: Option<thread::JoinHandle<()>>,
-    table: TableState,
-    egui: EguiBackend,
-    ui: UiState,
-    handlers: Vec<Handler>,
-    network_session: Option<P2PSession<GGRSConfig>>,
-    sess_builder: SessionBuilder<GGRSConfig>,
-    skipping_frames: u32,
-    last_update: Instant,
-    accumulator: Duration,
-    reversed_table: bool,
-    players: Vec<Player>,
-    tx: mpsc::Sender<String>,
-    mode: MultiplayerMode,
-}
-
-struct UiState {
-    debug: DebugState,
-}
-#[derive(Clone)]
-pub struct TableState {
-    paddles: Vec<Paddle>,
-}
-struct DebugState {
-    show_debug: bool,
-    show_playarea: bool,
-}
-#[derive(new, Clone)]
-pub struct Paddle {
-    id: u16,
-    x: f32,
-    left: bool,
-    #[new(value = "300.0")]
-    y: f32,
-    #[new(value = "20.0")]
-    width: f32,
-    #[new(value = "100.0")]
-    height: f32,
-    // #[new(default)]
-    // texture_id: u16,
-
-    // rotation in radians
-    #[new(default)]
-    rotation: f32,
-    #[new(default)]
-    rotation_velocity: f32,
-    #[new(default)]
-    velocity_x: f32,
-    #[new(default)]
-    velocity_y: f32,
-    #[new(value = "0.1")]
-    friction: f32,
-    #[new(value = "70.0")]
-    acceleration: f32,
-    #[new(default)]
-    next_stop: f32,
-    #[new(value = "false")]
-    going_acw: bool,
-    #[new(value = "false")]
-    going_cw: bool,
-    // input_handler: Box<dyn InputHandler>,
-}
-struct Handler {
-    input_handler: Box<dyn InputHandler>,
-    // affected_paddles: Vec<u16>,
-}
-// impl Paddle {
-//     fn new(left: bool) -> Paddle {
-//         Paddle {
-//             x: if left { 20.0 } else { 760.0 },
-//             y: 300.0,
-//             width: 20.0,
-//             height: 100.0,
-//             texture_id: 0,
-//             rotation: 0.0,
-//             rotation_velocity: 0.0,
-//             velocity_x: 0.0,
-//             velocity_y: 0.0,
-//             friction: 0.1,
-//             acceleration: 70.0,
-//             next_stop: 0.0,
-//             going_acw: false,
-//             going_cw: false,
-//         }
-//     }
-// }
-
-impl PpanState {
-    fn new(sess: SessionBuilder<GGRSConfig>, reversed_table: bool) -> PpanState {
-        let (tx, rx) = mpsc::channel();
-        thread::spawn(move || {
-            rx.try_recv().unwrap_or_else(|_| String::new());
-            // println!("failed + L + ratio");
-            // create ppan.log
-
-            let mut file = OpenOptions::new()
-                .write(true)
-                .append(true)
-                .create(true)
-                .open("ppan.log")
-                .unwrap_or(
-                    OpenOptions::new()
-                        .write(true)
-                        .append(true)
-                        .create(true)
-                        .open("/tmp/ppan.log")
-                        .unwrap(),
-                );
-            loop {
-                // println!("attempting to recv");
-                writeln!(file, "{}", rx.recv().unwrap()).unwrap();
-            }
-        });
-        let s = PpanState {
-            mcast: Arc::new(AtomicBool::new(false)),
-            mcastthread: None,
-            mode: MultiplayerMode::None,
-            tx,
-            table: TableState {
-                paddles: vec![
-                    Paddle::new(
-                        0, 40.0,
-                        true, /* Box::new(KeyboardInputHandler::new(
-                              *     KeyCode::W,
-                              *     KeyCode::S,
-                              *     KeyCode::A,
-                              *     KeyCode::D,
-                              *     KeyCode::V,
-                              *     KeyCode::C,
-                              * )), */
-                    ),
-                    Paddle::new(
-                        1, 760.0,
-                        false, /* Box::new(KeyboardInputHandler::new(
-                               *     KeyCode::I,
-                               *     KeyCode::K,
-                               *     KeyCode::J,
-                               *     KeyCode::L,
-                               *     KeyCode::Period,
-                               *     KeyCode::Comma,
-                               * )), */
-                    ),
-                ],
+    commands.spawn_bundle(Camera2dBundle::default());
+    commands.spawn_bundle(Text2dBundle {
+        // set font
+        text: Text::from_section(
+            "Hello World",
+            TextStyle {
+                font,
+                font_size: 40.0,
+                color: Color::WHITE,
             },
-            egui: EguiBackend::default(),
-            ui: UiState {
-                debug: DebugState {
-                    show_debug: true,
-                    show_playarea: false,
+
+        ),
+        transform:
+        // centre of screen
+        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+
+        ..Default::default()
+    });
+    for _ in 0..1 {
+        // let mut commands = world.get_resource_mut::<Commands>().unwrap();
+        commands
+            .spawn_bundle(PaddleBundle {
+                rotation_velocity: RotationVelocity(0.0),
+                velocity: Velocity(0.0, 0.0),
+                acceleration: Acceleration(0.0),
+                next_stop: NextStop(0.0),
+                rotating: Rotating(RotatingM::Neither),
+                sprite: SpriteBundle {
+                    sprite: Sprite {
+                        color: Color::rgb(0.5, 0.5, 1.0),
+                        custom_size: Some(Vec2::new(10.0, 50.0)),
+                        ..Default::default()
+                    },
+                    ..Default::default()
                 },
-            },
-            handlers: vec![
-                Handler {
-                    input_handler: Box::new(KeyboardInputHandler::new(
-                        KeyCode::W,
-                        KeyCode::S,
-                        // reverse L and R if the table is reversed
-                        if reversed_table {
-                            KeyCode::D
-                        } else {
-                            KeyCode::A
-                        },
-                        if reversed_table {
-                            KeyCode::A
-                        } else {
-                            KeyCode::D
-                        },
-                        if reversed_table {
-                            KeyCode::C
-                        } else {
-                            KeyCode::V
-                        },
-                        if reversed_table {
-                            KeyCode::V
-                        } else {
-                            KeyCode::C
-                        },
-                    )),
-                    // affected_paddles: vec![0],
-                },
-                Handler {
-                    // input_handler: Box::new(KeyboardInputHandler::new(
-                    //     KeyCode::I,
-                    //     KeyCode::K,
-                    //     KeyCode::J,
-                    //     KeyCode::L,
-                    //     KeyCode::Period,
-                    //     KeyCode::Comma,
-                    // )),
-                    input_handler: Box::new(EmptyInputHandler {}),
-                    // affected_paddles: vec![1],
-                },
-            ],
-            sess_builder: sess,
-            network_session: None,
-            skipping_frames: 0,
-            last_update: Instant::now(),
-            accumulator: Duration::new(0, 0),
-            reversed_table,
-            players: vec![],
-        };
-        println!("{}", s.table.paddles[0].left);
-        s
-    }
-}
-
-impl event::EventHandler<ggez::GameError> for PpanState {
-    #[allow(clippy::too_many_lines)]
-    fn update(&mut self, ctx: &mut Context) -> GameResult {
-        let log = |msg: &str| match self.tx.send(format!(
-            "{}: {}",
-            // time
-            SystemTime::now()
-                .duration_since(SystemTime::UNIX_EPOCH)
-                .unwrap()
-                .as_millis(),
-            msg
-        )) {
-            Ok(_) => {}
-            Err(e) => {
-                panic!("Error sending log message: {}", e);
-            }
-        };
-        // update window size
-        let (width, height) = graphics::drawable_size(ctx);
-        graphics::set_screen_coordinates(
-            ctx,
-            graphics::Rect::new(0.0, 0.0, width as f32, height as f32),
-        )?;
-        let egui_ctx = self.egui.ctx();
-        egui::Window::new("Debug Menu")
-            .open(&mut self.ui.debug.show_debug)
-            .show(&egui_ctx, |ui| {
-                let fps = ProgressBar::new((ggez::timer::fps(ctx) / 60.0) as f32)
-                    .text(format!("{} FPS", ggez::timer::fps(ctx).round()));
-                ui.add(fps);
-
-                ui.label(format!(
-                    "p1 x: {} y: {} state: {} up: {}",
-                    self.table.paddles[0].x,
-                    self.table.paddles[0].y,
-                    self.handlers[0].input_handler.snapshot(),
-                    self.handlers[0].input_handler.is_up()
-                ));
-
-                ui.label(format!(
-                    "p2 x: {} y: {} state: {} up: {}",
-                    self.table.paddles[1].x,
-                    self.table.paddles[1].y,
-                    self.handlers[1].input_handler.snapshot(),
-                    self.handlers[1].input_handler.is_up()
-                ));
-                ui.end_row();
-                match &self.mode {
-                    MultiplayerMode::Manual => {
-                        if ui.button("add player").clicked() {
-                            self.players.push(Player {
-                                addr: PlayerType::Local,
-                                txt: "me".to_string(),
-                            });
-                        }
-                        ui.end_row();
-                        if self.network_session.is_none() {
-                            for player in &mut self.players {
-                                ui.label(format!(
-                                    "player type: {}",
-                                    match player.addr {
-                                        PlayerType::Local => "local",
-                                        PlayerType::Remote(_) => "remote",
-                                        PlayerType::Spectator(_) => "spectator",
-                                    },
-                                    // match player.addr {
-                                    //     PlayerType::Local =>
-                                    //         "localhost".to_string(),
-                                    //     PlayerType::Remote(addr) =>
-                                    //         addr.to_string(),
-                                    //     PlayerType::Spectator(addr) =>
-                                    //         addr.to_string(),
-                                    // }
-                                ));
-                                let response = ui.add(egui::TextEdit::singleline(&mut player.txt));
-                                if response.lost_focus() && ui.input().key_pressed(egui::Key::Enter)
-                                {
-                                    let socketaddr: Option<SocketAddr> = match player.txt.parse() {
-                                        Ok(addr) => Some(addr),
-                                        Err(_) => None,
-                                    };
-
-                                    if let Some(socket) = socketaddr {
-                                        println!("new address: {}", socket);
-                                        player.addr = PlayerType::Remote(socket);
-                                    } else {
-                                        println!("invalid address");
-                                        player.txt = match player.addr {
-                                            PlayerType::Local => "me".to_string(),
-                                            PlayerType::Remote(addr)
-                                            | PlayerType::Spectator(addr) => addr.to_string(),
-                                        };
-                                        return;
-                                    }
-                                }
-                                ui.end_row();
-                            }
-
-                            if ui.button("start").clicked() {
-                                println!("clicked");
-                                // TODO: figure out a way to mess with ownership so that this works
-                                self.players.iter_mut().enumerate().for_each(|(i, player)| {
-                                    let mut sb: SessionBuilder<GGRSConfig> = SessionBuilder::new();
-                                    swap(&mut self.sess_builder, &mut sb);
-                                    self.sess_builder = sb
-                                        .add_player(
-                                            match player.addr {
-                                                PlayerType::Local => PlayerType::Local,
-                                                PlayerType::Remote(addr) => {
-                                                    PlayerType::Remote(addr)
-                                                }
-                                                PlayerType::Spectator(addr) => {
-                                                    PlayerType::Spectator(addr)
-                                                }
-                                            },
-                                            i,
-                                        )
-                                        .unwrap();
-                                });
-                                self.network_session = Some(
-                                    take(&mut self.sess_builder)
-                                        .with_num_players(self.players.len())
-                                        .with_sparse_saving_mode(true)
-                                        .start_p2p_session(
-                                            UdpNonBlockingSocket::bind_to_port(
-                                                if self.reversed_table { 7102 } else { 7101 },
-                                            )
-                                            .unwrap(),
-                                        )
-                                        .unwrap(),
-                                );
-                                println!("started");
-                            }
-                            if ui.button("back").clicked() {
-                                self.mode = MultiplayerMode::None;
-                                self.network_session = None;
-                                self.players = vec![];
-                                return;
-                            }
-                        }
-                    }
-                    MultiplayerMode::LocalMode => {
-                        if ui.button("join").clicked() {
-                            self.mode = MultiplayerMode::LocalClient;
-                        }
-                        if ui.button("host").clicked() {
-                            self.mode = MultiplayerMode::LocalHost;
-                        }
-                    }
-                    MultiplayerMode::Server => todo!(),
-                    MultiplayerMode::None => {
-                        if ui.button("manual").clicked() {
-                            self.mode = MultiplayerMode::Manual;
-                        }
-                        if ui.button("local").clicked() {
-                            self.mode = MultiplayerMode::LocalMode;
-                        }
-                        if ui.button("server").clicked() {
-                            self.mode = MultiplayerMode::Server;
-                        }
-                        ui.end_row();
-                    }
-
-                    MultiplayerMode::LocalHost => {
-                        // hehe, localhost
-                        let name = "main";
-                        let addr = *IPV4;
-                        let addr = SocketAddr::new(addr, PORT);
-                        let multicasting = Arc::clone(&self.mcast);
-                        if ui.button("back").clicked() {
-                            self.mode = MultiplayerMode::None;
-                            self.network_session = None;
-                            self.players = vec![];
-                            multicasting.store(false, Ordering::Relaxed);
-                            return;
-                        }
-
-                        if self.mcast.load(Ordering::Relaxed) {
-                            return;
-                        }
-                        multicasting.store(true, Ordering::Relaxed);
-                        let thread_multicasting = Arc::clone(&self.mcast);
-
-                        let thread =
-                            std::thread::Builder::new()
-                                .name(name.to_string())
-                                .spawn(move || {
-                                    let name = "host";
-                                    // socket creation will go here...
-
-                                    // We'll be looping until the client indicates it is done.
-                                    let listener = join_multicast(addr).unwrap();
-                                    // test receive and response code will go here...
-                                    let mut buf: [MaybeUninit<u8>; 64] =
-                                        [MaybeUninit::<u8>::uninit(); 64];
-
-                                    while thread_multicasting.load(Ordering::Relaxed) {
-                                        // we're assuming failures were timeouts, the client_done loop will stop us
-                                        match listener.recv_from(&mut buf) {
-                                            Ok((len, remote_addr)) => {
-                                                let data = &buf[..len];
-                                                unsafe {
-                                                    let data = data
-                                                        .iter()
-                                                        .map(|x| x.assume_init())
-                                                        .collect::<Vec<u8>>();
-                                                    let data = data.as_slice();
-
-                                                    match bincode::deserialize::<ShareData>(data) {
-                                                        Ok(data) => {
-                                                            if data.hosting {
-                                                                println!(
-                                                                    "{}: found host, ignoring...",
-                                                                    name
-                                                                );
-                                                            } else {
-                                                                println!(
-                                                                    "{}: found client {} ({}), \
-                                                                     responding with host info...",
-                                                                    name, data.hostname, data.ip
-                                                                );
-                                                                let data = ShareData {
-                                                                    hosting: true,
-                                                                    ip: local_ip()
-                                                                        .unwrap()
-                                                                        .to_string(),
-                                                                    hostname: hostname::get()
-                                                                        .unwrap()
-                                                                        .to_string_lossy()
-                                                                        .to_string(),
-                                                                    port: 7101,
-                                                                    version: env!("CURRENT_TAG")
-                                                                        .to_string(),
-                                                                };
-                                                                let data =
-                                                                    bincode::serialize(&data)
-                                                                        .unwrap();
-                                                                // wait 2000ms to make sure the client has time to start listening
-                                                                // std::thread::sleep(
-                                                                //     Duration::from_millis(2000),
-                                                                // );
-                                                                // let socket = new_socket(
-                                                                //     &remote_addr
-                                                                //         .as_socket()
-                                                                //         .unwrap(),
-                                                                // )
-                                                                // .unwrap();
-                                                                listener
-                                                                    .set_multicast_if_v4(
-                                                                        &Ipv4Addr::new(0, 0, 0, 0),
-                                                                    )
-                                                                    .unwrap();
-                                                                listener
-                                                                    .send_to(
-                                                                        &data,
-                                                                        &SockAddr::from(
-                                                                            remote_addr
-                                                                                .as_socket()
-                                                                                .unwrap(),
-                                                                        ),
-                                                                    )
-                                                                    .expect("could not send_to!");
-                                                            }
-                                                        }
-                                                        Err(err) => {
-                                                            println!(
-                                                                "{}: error deserializing data: {}",
-                                                                name, err
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Err(err) => {
-                                                match err.kind() {
-                                                    // we're assuming failures were timeouts, the client_done loop will stop us
-                                                    std::io::ErrorKind::TimedOut
-                                                    | std::io::ErrorKind::WouldBlock => {}
-                                                    _ => {
-                                                        panic!("{}: error: {}", name, err);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    println!("{}: quitting", name);
-                                });
-                        self.mcastthread = Some(thread.unwrap());
-
-                        println!("{}: joined: {}", name, addr);
-                    }
-
-                    MultiplayerMode::LocalClient => {
-                        let name = "main";
-                        let addr = *IPV4;
-                        let addr = SocketAddr::new(addr, PORT);
-                        let multicasting = Arc::clone(&self.mcast);
-                        if ui.button("back").clicked() {
-                            self.mode = MultiplayerMode::None;
-                            self.network_session = None;
-                            self.players = vec![];
-                            multicasting.store(false, Ordering::Relaxed);
-                            return;
-                        }
-                        if ui.button("refresh").clicked() {
-                            multicasting.store(false, Ordering::Relaxed);
-                            while !multicasting.load(Ordering::Relaxed) {}
-                            multicasting.store(false, Ordering::Relaxed);
-                        }
-                        if multicasting.load(Ordering::Relaxed) {
-                            return;
-                        }
-                        multicasting.store(true, Ordering::Relaxed);
-                        let thread_multicasting = Arc::clone(&self.mcast);
-
-                        let thread =
-                            std::thread::Builder::new()
-                                .name(name.to_string())
-                                .spawn(move || {
-                                    let listener = join_multicast(addr).unwrap();
-                                    let name = "client";
-                                    // socket creation will go here...
-
-                                    // We'll be looping until the client indicates it is done.
-                                    // test receive and response code will go here...
-                                    let mut buf: [MaybeUninit<u8>; 64] =
-                                        [MaybeUninit::<u8>::uninit(); 64];
-                                    {
-                                        let data = ShareData {
-                                            hostname: hostname::get()
-                                                .unwrap_or_else(|_| "Player".into())
-                                                .to_str()
-                                                .unwrap()
-                                                .to_string(),
-                                            port: 7101,
-                                            ip: local_ip().unwrap().to_string(),
-                                            version: env!("CURRENT_TAG").to_string(),
-                                            hosting: false,
-                                        };
-                                        let data = bincode::serialize(&data).unwrap();
-                                        let data = data.as_slice();
-                                        listener
-                                            .set_multicast_if_v4(&Ipv4Addr::new(0, 0, 0, 0))
-                                            .unwrap();
-                                        listener
-                                            .send_to(
-                                                data,
-                                                &SockAddr::from(SocketAddr::new(*IPV4, 7101)),
-                                            )
-                                            .expect("could not send_to!");
-                                    }
-
-                                    while thread_multicasting.load(Ordering::Relaxed) {
-                                        // we're assuming failures were timeouts, the client_done loop will stop us
-                                        match &listener.recv_from(&mut buf) {
-                                            Ok((len, remote_addr)) => {
-                                                let buf = buf.to_owned();
-                                                let len = *len;
-                                                let data: &[MaybeUninit<u8>] = &buf[..len];
-                                                unsafe {
-                                                    let data: Vec<u8> = data
-                                                        .iter()
-                                                        .map(|x| x.assume_init())
-                                                        .collect::<Vec<u8>>();
-                                                    let data = data.as_slice();
-
-                                                    match bincode::deserialize::<ShareData>(data) {
-                                                        Ok(data) => {
-                                                            if data.hosting {
-                                                                println!(
-                                                                    "{}: found host! {} ({})",
-                                                                    name, data.hostname, data.ip
-                                                                );
-                                                            } else if data.ip
-                                                                == local_ip().unwrap().to_string()
-                                                            {
-                                                                println!(
-                                                                    "{}: found self ({}), \
-                                                                     ignoring...",
-                                                                    name,
-                                                                    hostname::get()
-                                                                        .unwrap_or_else(|_| {
-                                                                            "Player".into()
-                                                                        })
-                                                                        .to_str()
-                                                                        .unwrap()
-                                                                );
-                                                            } else {
-                                                                println!(
-                                                                    "{}: found client, ignoring...",
-                                                                    name
-                                                                );
-                                                            }
-                                                        }
-                                                        Err(err) => {
-                                                            println!(
-                                                                "{}: got err: {} from: {:?}",
-                                                                name, err, remote_addr
-                                                            );
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                            Err(err) => {
-                                                match err.kind() {
-                                                    // we're assuming failures were timeouts, the client_done loop will stop us
-                                                    std::io::ErrorKind::TimedOut
-                                                    | std::io::ErrorKind::WouldBlock => {}
-                                                    _ => {
-                                                        panic!("{}: error: {}", name, err);
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-
-                                    thread_multicasting.store(true, Ordering::Relaxed);
-                                    println!("{}: quitting", name);
-                                });
-
-                        self.mcastthread = Some(thread.unwrap());
-
-                        println!("{}: joined: {}", name, addr);
-
-                        // let message = format!("{}", env!("CURRENT_TAG")).into_bytes();
-                        // let message = message.as_slice();
-
-                        // create the sending socket
-                    }
-                };
-
-                if self.network_session.is_some()
-                    && !self
-                        .network_session
-                        .as_ref()
-                        .unwrap()
-                        .remote_player_handles()
-                        .is_empty()
-                {
-                    // println!("we good");
-                    let stats = self.network_session.as_ref().unwrap().network_stats(
-                        self.network_session
-                            .as_ref()
-                            .unwrap()
-                            .remote_player_handles()[0],
-                    );
-                    match stats {
-                        Ok(stats) => {
-                            let txt = format!(
-                                "{} kbps, send queue is {} ({} confirmed frame{}). {}ms ping. \
-                                 we're around {: >2} frames {: >6}, and the other player ({}) is \
-                                 {: >2} frames {: >6}",
-                                stats.kbps_sent,
-                                stats.send_queue_len,
-                                self.network_session.as_ref().unwrap().confirmed_frame(),
-                                if self.network_session.as_ref().unwrap().confirmed_frame() == 1 {
-                                    ""
-                                } else {
-                                    "s"
-                                },
-                                stats.ping,
-                                stats.local_frames_behind.abs(),
-                                if stats.local_frames_behind > 0 {
-                                    "behind"
-                                } else {
-                                    "ahead"
-                                },
-                                self.network_session
-                                    .as_ref()
-                                    .unwrap()
-                                    .remote_player_handles()[0],
-                                stats.remote_frames_behind.abs(),
-                                if stats.remote_frames_behind > 0 {
-                                    "behind"
-                                } else {
-                                    "ahead"
-                                },
-                            );
-                            ui.label(txt);
-                            // println!("stats {}", txt);
-                        }
-                        Err(e) => {
-                            ui.label(format!("network stats unavailable: {}", e));
-                            println!("unav {}", e);
-                        }
-                    }
-                } else {
-                    ui.label("no network session active");
-                }
-                ui.checkbox(&mut self.ui.debug.show_playarea, "show playarea");
-                if ui.button("quit").clicked() {
-                    std::process::exit(0);
-                }
-
-                // ui.allocate_space(ui.available_size());
+            })
+            .insert(Paddle)
+            .insert_bundle(InputManagerBundle::<Action> {
+                // Stores "which actions are currently pressed"
+                action_state: ActionState::default(),
+                // Describes how to convert from player inputs into those actions
+                input_map: default_map.clone(),
             });
-
-        // let targetfps = 6000;
-
-        if keyboard::is_key_pressed(ctx, KeyCode::Q) {
-            // quit the game
-            println!("Quitting game!");
-            // self.network_session.disconnect_player(self.network_session.local_player_handles()[0]);
-            std::process::exit(0);
-        }
-
-        if keyboard::is_key_pressed(ctx, KeyCode::Backslash) {
-            self.ui.debug.show_debug = true;
-        }
-
-        // let mut delta_time = ggez::timer::delta(ctx).as_secs_f32();
-        if self.network_session.is_none() {
-            return Ok(());
-        }
-        let sess = self.network_session.as_mut().unwrap();
-        sess.poll_remote_clients();
-        // if sess.frames_ahead() > 0 {
-        //     delta_time *= 1.1;
-        // }
-        // // print GGRS events
-        for event in sess.events() {
-            match event {
-                GGRSEvent::Synchronizing { addr, total, count } => println!(
-                    "Synchronizing with player {} ({} of {})",
-                    addr, count, total
-                ),
-                GGRSEvent::Synchronized { addr } => println!("Synchronized with player {}", addr),
-                GGRSEvent::Disconnected { addr } => println!("Player {} disconnected", addr),
-                GGRSEvent::NetworkInterrupted {
-                    addr,
-                    disconnect_timeout,
-                } => println!(
-                    "Player {} network interrupted, disconnecting in {}ms...",
-                    addr, disconnect_timeout
-                ),
-                GGRSEvent::NetworkResumed { addr } => println!("Player {} network resumed!", addr),
-                GGRSEvent::WaitRecommendation { skip_frames } => {
-                    self.skipping_frames = skip_frames;
-                    println!(
-                        "Wait recommended, attempting to skip {} frames to catch up",
-                        skip_frames
-                    );
-                }
-            }
-        }
-
-        // this is to keep ticks between clients synchronized.
-        // if a client is ahead, it will run frames slightly slower to allow catching up
-        let delta_time = 1. / 60.0;
-        // if sess.frames_ahead() > 0 {
-        //     delta_time *= 1.1;
-        // }
-
-        // get delta time from last iteration and accumulate it
-        let delta = Instant::now().duration_since(self.last_update);
-        self.accumulator = self.accumulator.saturating_add(delta);
-        self.last_update = Instant::now();
-
-        if sess.current_state() != SessionState::Running {
-            return Ok(());
-        }
-
-        for handle in sess.local_player_handles() {
-            self.handlers[0].input_handler.tick(ctx);
-            sess.add_local_input(handle, self.handlers[0].input_handler.snapshot())
-                .unwrap();
-        }
-        let targetfps = 60;
-        if !ggez::timer::check_update_time(ctx, targetfps) {
-            log("frame | skipped");
-            return Ok(());
-        }
-
-        match sess.advance_frame() {
-            Ok(requests) => {
-                println!("Request size: {:?}", requests.len());
-                log(&format!(
-                    "req | start | {} --------------------",
-                    sess.confirmed_frame()
-                ));
-                requests.iter().enumerate().for_each(|(i, req)| {
-                    log(&format!("req | {}/{} ---", i + 1, requests.len()));
-                    match req {
-                        ggrs::GGRSRequest::LoadGameState { cell, frame } => {
-                            println!("REQ: Loading frame {}", frame);
-                            log(&format!("state | load | {}", frame));
-                            self.table = cell.load().unwrap();
-                        }
-                        ggrs::GGRSRequest::SaveGameState { cell, frame } => {
-                            println!("REQ: Saving frame {}", frame);
-                            log(&format!("state | save | {}", frame));
-
-                            cell.save(*frame, Some(self.table.clone()), None);
-                        }
-                        ggrs::GGRSRequest::AdvanceFrame { inputs } => {
-                            println!("REQ: Advancing frame");
-                            if self.skipping_frames > 0 {
-                                self.skipping_frames -= 1;
-                                println!(
-                                    "skipped frame {}, planning to skip {} more",
-                                    sess.current_frame(),
-                                    self.skipping_frames
-                                );
-                                log(&format!("req | skip | {}", self.skipping_frames));
-                                return;
-                            };
-                            println!("frame {}", sess.current_frame());
-                            log(&format!("req | calc | {}", sess.current_frame()));
-
-                            for (i, input) in inputs.iter().enumerate() {
-                                match input.1 {
-                                    ggrs::InputStatus::Predicted => {
-                                        println!(
-                                            "status: predicted input on frame {} for player {}",
-                                            sess.current_frame(),
-                                            i
-                                        );
-                                        log(&format!(
-                                            "req | predicted | {} | {}",
-                                            i,
-                                            sess.current_frame(),
-                                        ));
-                                    }
-                                    ggrs::InputStatus::Disconnected => {
-                                        println!(
-                                            "status: disconnected input on frame {} for player {}",
-                                            sess.current_frame(),
-                                            i
-                                        );
-                                        log(&format!(
-                                            "req | disconnected | {} | {}",
-                                            i,
-                                            sess.current_frame(),
-                                        ));
-                                    }
-                                    ggrs::InputStatus::Confirmed => {
-                                        println!(
-                                            "status: confirmed input on frame {} for player {}",
-                                            sess.current_frame(),
-                                            i
-                                        );
-                                        log(&format!(
-                                            "req | confirmed | {} | {}",
-                                            i,
-                                            sess.current_frame(),
-                                        ));
-                                    }
-                                }
-                                let mut handler = NetworkInputHandler::new(input.0);
-                                // if i == 1 {
-                                //     // swap the left and right values for the second player
-                                //     (handler.going_left, handler.going_right) =
-                                //         (handler.going_right, handler.going_left);
-                                //     (handler.rotating_acw, handler.rotating_cw) =
-                                //         (handler.rotating_cw, handler.rotating_acw);
-                                // }
-
-                                // find paddle where id is i
-                                let paddle = self
-                                    .table
-                                    .paddles
-                                    .iter_mut()
-                                    .find(|p| p.id as usize == i)
-                                    .unwrap();
-                                handler.tick(ctx);
-                                // input handling
-                                compute(&handler, paddle, delta_time);
-                            }
-                        }
-                    }
-                });
-                log("req | end");
-            }
-            Err(e) => match e {
-                ggrs::GGRSError::PredictionThreshold => {
-                    panic!("too many frames behind");
-                }
-                ggrs::GGRSError::InvalidRequest { info: _ } => todo!(),
-                ggrs::GGRSError::MismatchedChecksum { frame: _ } => todo!(),
-                ggrs::GGRSError::NotSynchronized => todo!(),
-                ggrs::GGRSError::SpectatorTooFarBehind => todo!(),
-                ggrs::GGRSError::SocketCreationFailed => todo!(),
-                ggrs::GGRSError::PlayerDisconnected => todo!(),
-                ggrs::GGRSError::DecodingError => todo!(),
-            },
-        }
-        // calculate delta time, but factor in the framerate
-
-        // for loop with both left and right paddles
-
-        Ok(())
+        // world.resource_scope(|_, mut table: Mut<Table>| {
+        // table.paddles[i].push(paddle);
+        // });
     }
+}
 
-    fn draw(&mut self, ctx: &mut Context) -> GameResult {
-        let (width, height) = graphics::drawable_size(ctx);
+fn movement(
+    mut query: Query<
+        (
+            &ActionState<Action>,
+            &mut Transform,
+            &mut Velocity,
+            &mut Acceleration,
+            &mut NextStop,
+            &mut Rotating,
+            &mut RotationVelocity,
+        ),
+        With<Paddle>,
+    >,
+    _time: Res<Time>,
+) {
+    for (
+        action_state,
+        mut transform,
+        mut velocity,
+        acceleration,
+        mut next_stop,
+        mut rotating,
+        mut rotation_velocity,
+    ) in query.iter_mut()
+    {
+        let delta_time = 16.0 / 1000.0;
+        let friction = 0.1;
+        // cpnvert to degrees
+        let mut rotation = (transform.rotation.z * 180.0 / std::f32::consts::PI).round() / 180.0
+            * std::f32::consts::PI;
 
-        graphics::clear(ctx, [0.1, 0.2, 0.0, 1.0].into());
+        let rot_accel = 0.8;
+        let (width, _height) = (10.0, 10.0);
 
-        // we have to scale everything by the screen's size over 800x600, since that's what the game's expecting
-
-        // step 1: check if we need letterboxing
-        let real_ratio = width as f32 / height as f32;
-        let dummy_ratio = 800.0 / 600.0;
-        let extra_width: f32;
-        let extra_height: f32;
-        if real_ratio > dummy_ratio {
-            // we need letterboxing
-            extra_height = 0.0;
-            extra_width = width - (height * dummy_ratio);
-        } else if real_ratio < dummy_ratio {
-            // we need letterboxing
-            extra_width = 0.0;
-            extra_height = height - (width / dummy_ratio);
-        } else {
-            // we don't need letterboxing
-            extra_width = 0.0;
-            extra_height = 0.0;
+        if action_state.pressed(Action::Right) {
+            println!("right!!!");
+            velocity.0 += acceleration.0;
+            // cap velocity to 1500
+            if velocity.0 > 1500.0 {
+                velocity.0 = 1500.0;
+            }
         }
-        let playarea_width = width - extra_width;
-        let playarea_height = height - extra_height;
+        if action_state.pressed(Action::Left) {
+            velocity.0 -= acceleration.0;
+            // cap velocity to -1500
+            if velocity.0 < -1500.0 {
+                velocity.0 = -1500.0;
+            }
+        }
+        if action_state.pressed(Action::Up) {
+            velocity.1 -= acceleration.0;
+            // cap velocity to -1500
+            if velocity.1 < -1500.0 {
+                velocity.1 = -1500.0;
+            }
+        }
+        if action_state.pressed(Action::Down) {
+            velocity.1 += acceleration.0;
+            // cap velocity to 1500
+            if velocity.1 > 1500.0 {
+                velocity.1 = 1500.0;
+            }
+        }
 
-        // step 2: draw the playarea (if we need it)
-        if self.ui.debug.show_playarea {
-            // visualise actual play area
-            let playarearect = graphics::Rect::new(
-                extra_width / 2.0,
-                extra_height / 2.0,
-                playarea_width,
-                playarea_height,
+        if rotating.0 == RotatingM::AntiClockwise
+            && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0
+        {
+            rotating.0 = RotatingM::Neither;
+        } else if rotating.0 == RotatingM::Clockwise
+            && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0
+        {
+            rotating.0 = RotatingM::Neither;
+        }
+
+        if rotating.0 == RotatingM::Clockwise && rotating.0 == RotatingM::AntiClockwise {
+            // only keep cw
+            rotating.0 = RotatingM::Clockwise;
+        }
+
+        if action_state.pressed(Action::RotateAntiClockwise) {
+            rotating.0 = RotatingM::AntiClockwise;
+            // get next 90 degree rotation to the left
+            next_stop.0 =
+                (90.0 * ((rotation * 180.0 / std::f32::consts::PI) / 90.0).floor()) as f32;
+            if (next_stop.0 - (rotation * 180.0 / std::f32::consts::PI)).abs() < f32::EPSILON {
+                next_stop.0 -= 90.0;
+            }
+            while next_stop.0 < 0.0 {
+                next_stop.0 += 360.0;
+            }
+            next_stop.0 %= 360.0;
+        }
+
+        if action_state.pressed(Action::RotateClockwise) {
+            rotating.0 = RotatingM::Clockwise;
+
+            // get next 90 degree rotation to the right
+            next_stop.0 = (90.0 * (rotation * 180.0 / std::f32::consts::PI / 90.0).ceil()) as f32;
+            // check if same
+            if (next_stop.0 - rotation * 180.0 / std::f32::consts::PI).abs() < f32::EPSILON {
+                next_stop.0 += 90.0;
+            }
+            next_stop.0 %= 360.0;
+        }
+
+        // calculations
+        let mut initial_velocity = 0.0;
+
+        if (next_stop.0 - rotation * 180.0 / std::f32::consts::PI).abs() > 0.5 {
+            while rotation < 0.0 {
+                rotation += 360.0;
+            }
+            rotation %= 360.0;
+
+            // first, calculate clockwise and anticlockwise rotations
+            let mut first_displacement = next_stop.0 - rotation * 180.0 / std::f32::consts::PI;
+            let mut second_displacement =
+                next_stop.0 - (rotation * 180.0 / std::f32::consts::PI - 180.0);
+            // lmk if they're both positive or negative
+            #[cfg(debug_assertions)]
+            if (first_displacement > 0.0 && second_displacement > 0.0)
+                || (first_displacement < 0.0 && second_displacement < 0.0)
+            {
+                println!("woah there, that's a lot of rotation");
+            }
+            // if our current rotation is greater than the next stop, we need to add 360 to both displacements
+            if first_displacement < 0.0 && second_displacement < 0.0 {
+                while first_displacement < 0.0 && second_displacement < 0.0 {
+                    first_displacement += 180.0;
+                    second_displacement += 180.0;
+                }
+            }
+            if first_displacement > 0.0 && second_displacement > 0.0 {
+                while first_displacement > 0.0 && second_displacement > 0.0 {
+                    first_displacement -= 180.0;
+                    second_displacement -= 180.0;
+                }
+            }
+            // cw will always be positive, acw will always be negative
+
+            //  if the paddle's attempted rotation is left, its rotational velocity should decrease as it reaches the next 90 degree mark
+            // we'll use v^2 = u^2 + 2as to figure out the "initial" velocity, since we know the final velocity is 0 and acceleration is 10, and the displacement is just the rotation's distance from the nearest 90 degree mark
+            // we'll calculate two velocities, one for the rotation to the left and one for the rotation to the right
+            // and we'll use the one that is shortest
+            let initial_velocity_squared_first =
+                -(0.0 - 2.0 * rot_accel * first_displacement) % 360.0;
+            let initial_velocity_squared_second =
+                -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
+
+            // if they're both positive, something went wrong. log
+            debug_assert_eq!(
+                initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0,
+                false
             );
 
-            let rect = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                playarearect,
-                // need to convert [0.1, 0.2, 0.3, 1.0] into ints by * by 255
-                Color::from_rgba(
-                    (0.1_f32 * 255.0_f32).round() as u8,
-                    (0.2_f32 * 255.0_f32).round() as u8,
-                    (0.3_f32 * 255.0_f32).round() as u8,
-                    255,
-                ),
-            )?;
-            graphics::draw(ctx, &rect, graphics::DrawParam::default())?;
-        }
+            let init_vel_sq_cw = if initial_velocity_squared_first > initial_velocity_squared_second
+            {
+                initial_velocity_squared_first
+            } else {
+                initial_velocity_squared_second
+            };
+            let init_vel_sq_acw =
+                if initial_velocity_squared_first > initial_velocity_squared_second {
+                    initial_velocity_squared_second
+                } else {
+                    initial_velocity_squared_first
+                };
+            #[cfg(debug_assertions)]
+            println!(
+                "current velocity: {}, next stop: {}, current rotation: {}",
+                velocity.0, next_stop.0, rotation
+            );
+            #[cfg(debug_assertions)]
 
-        let paddles = self.table.paddles.iter_mut();
-
-        // step 3: draw paddles
-        for paddle in paddles {
-            let mut paddle = paddle.clone();
-            if self.reversed_table {
-                // reverse the paddle's x values and rotation
-                paddle.x = 800.0 - paddle.x;
-                paddle.rotation = 360.0 - paddle.rotation;
+            println!(
+                "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going \
+                 anticlockwise, we'd need a velocity of {:?}",
+                init_vel_sq_cw.sqrt(),
+                -(init_vel_sq_acw.abs().sqrt()),
+            );
+            // check nan
+            #[cfg(debug_assertions)]
+            if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
+                println!("one of the velocities is nan");
             }
-            let rectangle = Rect {
-                x: 0.0,
-                y: 0.0,
-                w: paddle.width * playarea_width / 800.0,
-                h: paddle.height * playarea_height / 600.0,
+
+            let initial_velocity_squared = if rotating.0 == RotatingM::AntiClockwise {
+                #[cfg(debug_assertions)]
+                println!("we need to go left, so we're using anticlockwise");
+                init_vel_sq_acw
+            } else if rotating.0 == RotatingM::Clockwise {
+                #[cfg(debug_assertions)]
+
+                println!("we need to go right, so we're using clockwise");
+                init_vel_sq_cw
+            } else {
+                // use the shortest one
+                #[cfg(debug_assertions)]
+
+                println!("we're not aiming anywhere, so we're using the shortest one");
+                if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
+                    #[cfg(debug_assertions)]
+
+                    println!("using clockwise, {:?}", init_vel_sq_cw);
+                    init_vel_sq_cw
+                } else {
+                    #[cfg(debug_assertions)]
+
+                    println!("using anticlockwise, {:?}", init_vel_sq_acw);
+                    init_vel_sq_acw
+                }
             };
 
-            let rect = graphics::Mesh::new_rectangle(
-                ctx,
-                graphics::DrawMode::fill(),
-                rectangle,
-                Color::WHITE,
-            )?;
-            graphics::draw(
-                ctx,
-                &rect,
-                graphics::DrawParam::new()
-                    .dest(Vec2::new(
-                        extra_width / 2.0 + paddle.x * playarea_width / 800.0,
-                        extra_height / 2.0 + paddle.y * playarea_height / 600.0,
-                    ))
-                    .rotation(paddle.rotation * (std::f64::consts::PI as f32) / 180.0)
-                    .offset(Vec2::new(
-                        (paddle.width * playarea_width / 800.0) / 2.0,
-                        (paddle.height * playarea_height / 600.0) / 2.0,
-                    )),
-            )?;
+            initial_velocity = if initial_velocity_squared < 0.0 {
+                -(initial_velocity_squared.abs().sqrt())
+            } else {
+                initial_velocity_squared.sqrt()
+            };
+        } else {
+            // if we're really close, just silently snap to the next stop
+            // should save us a couple cpu cycles
+            rotation = next_stop.0;
         }
-        graphics::draw(ctx, &self.egui, graphics::DrawParam::default())?;
+        // println!("initial_velocity: {}", initial_velocity);
+        rotation_velocity.0 = initial_velocity;
 
-        graphics::present(ctx)?;
-        Ok(())
-    }
+        // cap rotation velocity
+        let max_rotation_velocity = 8.0;
 
-    fn mouse_button_down_event(
-        &mut self,
-        _ctx: &mut Context,
-        button: event::MouseButton,
-        _x: f32,
-        _y: f32,
-    ) {
-        self.egui.input.mouse_button_down_event(button);
-    }
+        if action_state.pressed(Action::RotateClockwise) {
+            rotation_velocity.0 += max_rotation_velocity;
+        }
+        if action_state.pressed(Action::RotateAntiClockwise) {
+            rotation_velocity.0 -= max_rotation_velocity;
+        }
 
-    fn mouse_button_up_event(
-        &mut self,
-        _ctx: &mut Context,
-        button: event::MouseButton,
-        _x: f32,
-        _y: f32,
-    ) {
-        self.egui.input.mouse_button_up_event(button);
-    }
+        if rotation_velocity.0 > max_rotation_velocity {
+            rotation_velocity.0 = max_rotation_velocity;
+        } else if rotation_velocity.0 < -max_rotation_velocity {
+            rotation_velocity.0 = -max_rotation_velocity;
+        }
 
-    fn mouse_motion_event(&mut self, _ctx: &mut Context, x: f32, y: f32, _dx: f32, _dy: f32) {
-        self.egui.input.mouse_motion_event(x, y);
-    }
+        transform.rotate_z(-rotation_velocity.0 * std::f32::consts::PI / 180.0);
+        #[cfg(debug_assertions)]
+        println!("rotated {}deg", rotation_velocity.0);
 
-    fn key_down_event(
-        &mut self,
-        _ctx: &mut Context,
-        keycode: KeyCode,
-        keymods: event::KeyMods,
-        _repeat: bool,
-    ) {
-        self.egui.input.key_down_event(keycode, keymods);
-    }
+        // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
+        // println!(
+        //     "x: {: >4} y: {: >4} gl: {: >5} gr: {: >5} rot: {: >4} rotvel: {: >4} nxtstop: {: >4} fps: {: >4}",
+        //     // pad start to 3 chars
+        //     x.round(),
+        //     y.round(),
+        //     rotating.0 == RotatingM::AntiClockwise,
+        //     rotating.0 == RotatingM::Clockwise,
+        //     rotation.round(),
+        //     rotation_velocity.round(),
+        //     next_stop.round(),
+        //     ggez::timer::fps(_ctx).round()
+        // );!!
 
-    fn text_input_event(&mut self, _ctx: &mut Context, character: char) {
-        self.egui.input.text_input_event(character);
+        // speed calculations
+        transform.translation.x += velocity.0 * delta_time;
+        velocity.0 *= 1.0 - friction;
+
+        transform.translation.y += velocity.1 * delta_time;
+        velocity.1 *= 1.0 - friction;
+
+        // ensure transform.translation.0 is in bounds, and reset velocittransform.translation.1if it is
+        if transform.translation.x < width / 2.0 {
+            transform.translation.x = width / 2.0;
+            velocity.0 = 0.0;
+        } else if transform.translation.x > 800.0 - width / 2.0 {
+            transform.translation.x = 800.0 - width / 2.0;
+            velocity.0 = 0.0;
+        }
+        // 0 >transform.translation.y> 600
+        if transform.translation.y < 0.0 {
+            transform.translation.y = 0.0;
+            velocity.1 = 0.0;
+        } else if transform.translation.y > 600.0 {
+            transform.translation.y = 600.0;
+            velocity.1 = 0.0;
+        }
     }
 }
+#[cfg(feature = "discord")]
 
-fn main() -> GameResult {
-    let local_port = 7101;
-    let sess = SessionBuilder::<GGRSConfig>::new()
-        // .with_num_players(2)
-        .with_max_prediction_window(120);
-    // uncap fps
-
-    let cb = ggez::ContextBuilder::new("pong", "Jabster28").window_mode(
-        ggez::conf::WindowMode::default()
-            .resizable(true)
-            .maximized(true),
+fn setup_discord(world: &mut World) {
+    let discord = Discord::with_create_flags(
+        1_023_380_299_821_875_210,
+        discord_game_sdk::CreateFlags::NoRequireDiscord,
     );
-
-    let (mut ctx, event_loop) = cb.build()?;
-    // set fullscreen
-    ggez::graphics::set_fullscreen(&mut ctx, ggez::conf::FullscreenType::Windowed)?;
-
-    let state: PpanState = PpanState::new(sess, local_port == 7102);
-
-    event::run(ctx, event_loop, state)
+    match discord {
+        Ok(discord) => {
+            world.insert_non_send_resource(DiscordState(discord));
+        }
+        Err(_e) => {
+            println!("warning: discord setup failed...");
+        }
+    }
 }
-#[cfg(test)]
-mod tests {
-    use super::*;
 
-    #[test]
-    fn test_ipv4_multicast() {
-        assert!(IPV4.is_multicast());
-    }
+#[cfg(feature = "discord")]
 
-    #[test]
-    fn test_ipv6_multicast() {
-        assert!(IPV6.is_multicast());
+fn discord_update(discord: Option<NonSendMut<DiscordState>>) {
+    if discord.is_none() {
+        return;
     }
+    let mut discord = discord.unwrap();
+    discord.0.run_callbacks().unwrap();
+    let mut activity = discord_game_sdk::Activity::empty();
+    let activity = activity
+        // party status
+        .with_state("idle")
+        // player status
+        .with_details("in the menus");
+    discord.0.update_activity(activity, |_, result| {
+        if let Err(e) = result {
+            println!("Error updating activity: {}", e);
+        }
+    });
 }
