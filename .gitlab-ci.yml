@@ -10,6 +10,7 @@ default:
     - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
     - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin || true
     - export PATH="$CI_PROJECT_DIR/.cargo/bin:$PATH"
+    - bash -c "$(wget -O - https://apt.llvm.org/llvm.sh)"
 
 cache:
   paths:
