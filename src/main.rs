@@ -92,7 +92,7 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .add_plugin(InputManagerPlugin::<Action>::default())
-        .add_state(AppState::MainMenu)
+        .add_state(AppState::InGame)
         .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
         .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement));
     // .add_plugin(WorldInspectorPlugin::new())
@@ -154,7 +154,7 @@ fn setup_game(
             .spawn_bundle(PaddleBundle {
                 rotation_velocity: RotationVelocity(0.0),
                 velocity: Velocity(0.0, 0.0),
-                acceleration: Acceleration(0.0),
+                acceleration: Acceleration(10.0),
                 next_stop: NextStop(0.0),
                 rotating: Rotating(RotatingM::Neither),
                 sprite: SpriteBundle {
@@ -207,14 +207,21 @@ fn movement(
         let delta_time = 16.0 / 1000.0;
         let friction = 0.1;
         // cpnvert to degrees
-        let mut rotation = (transform.rotation.z * 180.0 / std::f32::consts::PI).round() / 180.0
-            * std::f32::consts::PI;
+        let rotation = transform.rotation.xyz().z;
+        let rotation = {
+            let mut newrot = rotation;
+            while newrot < 0.0 {
+                newrot += 360.0;
+            }
+            newrot % 360.0
+        };
+
+        println!("rotation: {}", rotation);
 
         let rot_accel = 0.8;
         let (width, _height) = (10.0, 10.0);
 
         if action_state.pressed(Action::Right) {
-            println!("right!!!");
             velocity.0 += acceleration.0;
             // cap velocity to 1500
             if velocity.0 > 1500.0 {
@@ -228,14 +235,14 @@ fn movement(
                 velocity.0 = -1500.0;
             }
         }
-        if action_state.pressed(Action::Up) {
+        if action_state.pressed(Action::Down) {
             velocity.1 -= acceleration.0;
             // cap velocity to -1500
             if velocity.1 < -1500.0 {
                 velocity.1 = -1500.0;
             }
         }
-        if action_state.pressed(Action::Down) {
+        if action_state.pressed(Action::Up) {
             velocity.1 += acceleration.0;
             // cap velocity to 1500
             if velocity.1 > 1500.0 {
@@ -284,146 +291,12 @@ fn movement(
             next_stop.0 %= 360.0;
         }
 
-        // calculations
-        let mut initial_velocity = 0.0;
-
-        if (next_stop.0 - rotation * 180.0 / std::f32::consts::PI).abs() > 0.5 {
-            while rotation < 0.0 {
-                rotation += 360.0;
-            }
-            rotation %= 360.0;
-
-            // first, calculate clockwise and anticlockwise rotations
-            let mut first_displacement = next_stop.0 - rotation * 180.0 / std::f32::consts::PI;
-            let mut second_displacement =
-                next_stop.0 - (rotation * 180.0 / std::f32::consts::PI - 180.0);
-            // lmk if they're both positive or negative
-            #[cfg(debug_assertions)]
-            if (first_displacement > 0.0 && second_displacement > 0.0)
-                || (first_displacement < 0.0 && second_displacement < 0.0)
-            {
-                println!("woah there, that's a lot of rotation");
-            }
-            // if our current rotation is greater than the next stop, we need to add 360 to both displacements
-            if first_displacement < 0.0 && second_displacement < 0.0 {
-                while first_displacement < 0.0 && second_displacement < 0.0 {
-                    first_displacement += 180.0;
-                    second_displacement += 180.0;
-                }
-            }
-            if first_displacement > 0.0 && second_displacement > 0.0 {
-                while first_displacement > 0.0 && second_displacement > 0.0 {
-                    first_displacement -= 180.0;
-                    second_displacement -= 180.0;
-                }
-            }
-            // cw will always be positive, acw will always be negative
-
-            //  if the paddle's attempted rotation is left, its rotational velocity should decrease as it reaches the next 90 degree mark
-            // we'll use v^2 = u^2 + 2as to figure out the "initial" velocity, since we know the final velocity is 0 and acceleration is 10, and the displacement is just the rotation's distance from the nearest 90 degree mark
-            // we'll calculate two velocities, one for the rotation to the left and one for the rotation to the right
-            // and we'll use the one that is shortest
-            let initial_velocity_squared_first =
-                -(0.0 - 2.0 * rot_accel * first_displacement) % 360.0;
-            let initial_velocity_squared_second =
-                -(0.0 - 2.0 * rot_accel * second_displacement) % 360.0;
-
-            // if they're both positive, something went wrong. log
-            debug_assert_eq!(
-                initial_velocity_squared_first > 0.0 && initial_velocity_squared_second > 0.0,
-                false
-            );
-
-            let init_vel_sq_cw = if initial_velocity_squared_first > initial_velocity_squared_second
-            {
-                initial_velocity_squared_first
-            } else {
-                initial_velocity_squared_second
-            };
-            let init_vel_sq_acw =
-                if initial_velocity_squared_first > initial_velocity_squared_second {
-                    initial_velocity_squared_second
-                } else {
-                    initial_velocity_squared_first
-                };
-            #[cfg(debug_assertions)]
-            println!(
-                "current velocity: {}, next stop: {}, current rotation: {}",
-                velocity.0, next_stop.0, rotation
-            );
-            #[cfg(debug_assertions)]
-
-            println!(
-                "so if we're going clockwise, we'll need a velocity of {:?}, but if we're going \
-                 anticlockwise, we'd need a velocity of {:?}",
-                init_vel_sq_cw.sqrt(),
-                -(init_vel_sq_acw.abs().sqrt()),
-            );
-            // check nan
-            #[cfg(debug_assertions)]
-            if (-init_vel_sq_acw.abs().sqrt()).is_nan() || init_vel_sq_cw.sqrt().is_nan() {
-                println!("one of the velocities is nan");
-            }
-
-            let initial_velocity_squared = if rotating.0 == RotatingM::AntiClockwise {
-                #[cfg(debug_assertions)]
-                println!("we need to go left, so we're using anticlockwise");
-                init_vel_sq_acw
-            } else if rotating.0 == RotatingM::Clockwise {
-                #[cfg(debug_assertions)]
-
-                println!("we need to go right, so we're using clockwise");
-                init_vel_sq_cw
-            } else {
-                // use the shortest one
-                #[cfg(debug_assertions)]
-
-                println!("we're not aiming anywhere, so we're using the shortest one");
-                if init_vel_sq_acw.abs() > init_vel_sq_cw.abs() {
-                    #[cfg(debug_assertions)]
-
-                    println!("using clockwise, {:?}", init_vel_sq_cw);
-                    init_vel_sq_cw
-                } else {
-                    #[cfg(debug_assertions)]
-
-                    println!("using anticlockwise, {:?}", init_vel_sq_acw);
-                    init_vel_sq_acw
-                }
-            };
-
-            initial_velocity = if initial_velocity_squared < 0.0 {
-                -(initial_velocity_squared.abs().sqrt())
-            } else {
-                initial_velocity_squared.sqrt()
-            };
-        } else {
-            // if we're really close, just silently snap to the next stop
-            // should save us a couple cpu cycles
-            rotation = next_stop.0;
-        }
-        // println!("initial_velocity: {}", initial_velocity);
-        rotation_velocity.0 = initial_velocity;
-
-        // cap rotation velocity
-        let max_rotation_velocity = 8.0;
-
-        if action_state.pressed(Action::RotateClockwise) {
-            rotation_velocity.0 += max_rotation_velocity;
-        }
-        if action_state.pressed(Action::RotateAntiClockwise) {
-            rotation_velocity.0 -= max_rotation_velocity;
-        }
-
-        if rotation_velocity.0 > max_rotation_velocity {
-            rotation_velocity.0 = max_rotation_velocity;
-        } else if rotation_velocity.0 < -max_rotation_velocity {
-            rotation_velocity.0 = -max_rotation_velocity;
-        }
-
-        transform.rotate_z(-rotation_velocity.0 * std::f32::consts::PI / 180.0);
-        #[cfg(debug_assertions)]
-        println!("rotated {}deg", rotation_velocity.0);
+        // #[cfg(debug_assertions)]
+        println!(
+            "next stop is {}, i'm at {} so i wanna set velocity to {}",
+            next_stop.0, rotation, rotation_velocity.0
+        );
+        transform.rotate_z(rotation_velocity.0 * std::f32::consts::PI / 180.0);
 
         // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
         // println!(
