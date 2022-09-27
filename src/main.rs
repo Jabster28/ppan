@@ -18,29 +18,6 @@ enum Action {
 use bevy_asset::{AssetServer, AssetServerSettings, Handle};
 #[cfg(debug_assertions)]
 use bevy_editor_pls::prelude::*;
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-enum Bindings {
-    Hotkeys(HotkeysInput),
-    Movement(MovementInput),
-    Camera(CameraInput),
-}
-
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-enum MovementInput {
-    Forward,
-    Right,
-    Up,
-}
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-enum CameraInput {
-    Yaw,
-    Pitch,
-}
-
-#[derive(PartialEq, Eq, Hash, Clone, Copy)]
-enum HotkeysInput {
-    Test,
-}
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum AppState {
@@ -201,7 +178,7 @@ fn movement(
         acceleration,
         mut next_stop,
         mut rotating,
-        mut rotation_velocity,
+        rotation_velocity,
     ) in query.iter_mut()
     {
         let delta_time = 16.0 / 1000.0;
@@ -218,7 +195,7 @@ fn movement(
 
         println!("rotation: {}", rotation);
 
-        let rot_accel = 0.8;
+        let _rot_accel = 0.8;
         let (width, _height) = (10.0, 10.0);
 
         if action_state.pressed(Action::Right) {
@@ -250,12 +227,10 @@ fn movement(
             }
         }
 
-        if rotating.0 == RotatingM::AntiClockwise
-            && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0
-        {
-            rotating.0 = RotatingM::Neither;
-        } else if rotating.0 == RotatingM::Clockwise
-            && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0
+        if (rotating.0 == RotatingM::AntiClockwise
+            && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0)
+            || (rotating.0 == RotatingM::Clockwise
+                && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0)
         {
             rotating.0 = RotatingM::Neither;
         }
