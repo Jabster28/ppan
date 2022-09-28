@@ -7,6 +7,7 @@ description = "pong, but a little more interesting."
 [package.metadata.bundle]
 identifier = "io.ppan"
 category = "public.app-category.arcade-games"
+icon = ["ppan.png"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
