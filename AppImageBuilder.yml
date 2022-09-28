@@ -5,7 +5,7 @@ AppDir:
   app_info:
     id: io.ppan
     name: ppan
-    icon: application-vnd.appimage
+    icon: ppan
     version: latest
     exec: ppan.x86_64
     exec_args: $@

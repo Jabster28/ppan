@@ -115,6 +115,8 @@ installerlinux:
     chmod +x appimage-builder
     mkdir -p AppDir/
     cp -r dist/* AppDir/
+    mkdir -p AppDir/usr/share/icons/hicolor/32x32/apps/
+    cp ppan.png AppDir/usr/share/icons/hicolor/32x32/apps/
     mkdir -p AppDir/lib/x86_64
     mv AppDir/x86_64/ AppDir/lib
     sudo ./appimage-builder
