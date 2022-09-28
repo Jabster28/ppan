@@ -8,6 +8,7 @@ description = "pong, but a little more interesting."
 identifier = "io.ppan"
 category = "public.app-category.arcade-games"
 resources = ["assets"]
+icon = ["ppan.png"]
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
