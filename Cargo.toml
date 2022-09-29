@@ -33,6 +33,7 @@ bevy-inspector-egui = "0.13.0"
 bevy_editor_pls = "0.1.1"
 bevy_asset = "0.8.1"
 leafwing-input-manager = "0.5.2"
+bevy_rapier2d = "0.16.2"
 [features]
 discord = ["discord_game_sdk"]
 
