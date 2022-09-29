@@ -30,11 +30,12 @@ enum AppState {
 
 struct DiscordState<'a>(Discord<'a, ()>);
 
-#[derive(PartialEq, Inspectable)]
+#[derive(PartialEq, Inspectable, Reflect, Default, Clone)]
 
 enum RotatingM {
     Clockwise,
     AntiClockwise,
+    #[default]
     Neither,
 }
 #[derive(Component)]
@@ -45,10 +46,15 @@ struct RotationVelocity(f32);
 
 #[derive(Inspectable, Component)]
 struct Acceleration(f32);
-
 #[derive(Inspectable, Component)]
+struct RotAcceleration(f32);
+
+#[derive(Inspectable, Component, Reflect, Default)]
+#[reflect(Component)]
 struct NextStop(f32);
 
+#[derive(Reflect, Default)]
+#[reflect(Component)]
 #[derive(Inspectable, Component)]
 struct Rotating(RotatingM);
 
@@ -56,6 +62,7 @@ struct Rotating(RotatingM);
 struct PaddleBundle {
     rotation_velocity: RotationVelocity,
     acceleration: Acceleration,
+    rot_acceleration: RotAcceleration,
     next_stop: NextStop,
     rotating: Rotating,
     #[bundle]
@@ -66,19 +73,19 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
         .add_plugin(InputManagerPlugin::<Action>::default())
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(100.0))
-        // .add_plugin(RapierDebugRenderPlugin::default())
+        .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0))
+        .add_plugin(RapierDebugRenderPlugin::default())
         .add_state(AppState::InGame)
         .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
         .add_startup_system(setup)
         // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
         .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement));
-    // .add_plugin(WorldInspectorPlugin::new())
+    // if debug
+    #[cfg(debug_assertions)]
+    app.add_plugin(EditorPlugin);
     #[cfg(feature = "discord")]
     app.add_startup_system(setup_discord.exclusive_system())
         .add_system(discord_update);
-    #[cfg(debug_assertions)]
-    app.add_plugin(EditorPlugin);
 
     app.run();
 }
@@ -140,13 +147,14 @@ fn setup_game(mut commands: Commands) {
         commands
             .spawn_bundle(PaddleBundle {
                 rotation_velocity: RotationVelocity(0.0),
-                acceleration: Acceleration(10.0),
+                acceleration: Acceleration(60.0),
+                rot_acceleration: RotAcceleration(1.0),
                 next_stop: NextStop(0.0),
                 rotating: Rotating(RotatingM::Neither),
                 sprite: SpriteBundle {
                     sprite: Sprite {
                         color: Color::rgb(0.5, 0.5, 1.0),
-                        custom_size: Some(Vec2::new(10.0, 50.0)),
+                        custom_size: Some(Vec2::new(30.0, 150.0)),
                         ..Default::default()
                     },
                     ..Default::default()
@@ -160,14 +168,16 @@ fn setup_game(mut commands: Commands) {
                 input_map: default_map.clone(),
             })
             .insert(RigidBody::Dynamic)
-            .insert(Collider::cuboid(5.0, 25.0))
+            .insert(Damping {
+                linear_damping: 1.7,
+                angular_damping: 1.0,
+            })
+            .insert(Velocity {
+                linvel: Vec2::new(0.0, 0.0),
+                angvel: 0.0,
+            })
+            .insert(Collider::cuboid(15.0, 75.0))
             .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
-        commands
-            .spawn()
-            .insert(RigidBody::Dynamic)
-            .insert(Collider::ball(50.0))
-            .insert(Restitution::coefficient(1.0))
-            .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 400.0, 0.0)));
         // world.resource_scope(|_, mut table: Mut<Table>| {
         // table.paddles[i].push(paddle);
         // });
@@ -181,14 +191,13 @@ fn movement(
             &mut Acceleration,
             &mut NextStop,
             &mut Rotating,
-            &mut ExternalImpulse,
+            &mut Velocity,
         ),
         With<Paddle>,
     >,
     _time: Res<Time>,
 ) {
-    for (action_state, acceleration, mut next_stop, mut rotating, mut impulse) in query.iter_mut() {
-        println!("aaa");
+    for (action_state, acceleration, mut next_stop, mut rotating, mut vel) in query.iter_mut() {
         // let delta_time = 16.0 / 1000.0;
         // let friction = 0.1;
         // // cpnvert to degrees
@@ -205,36 +214,19 @@ fn movement(
 
         // let _rot_accel = 0.8;
         // let (width, _height) = (10.0, 10.0);
-        let mut vel = (0.0, 0.0);
+        // let mut vel = (0.0, 0.0);
 
         if action_state.pressed(Action::Right) {
-            vel.0 += acceleration.0;
-            // cap velocity to 1500
-            if vel.0 > 1500.0 {
-                vel.0 = 1500.0;
-            }
-            println!("right {}", vel.0);
+            vel.linvel.x += acceleration.0;
         }
         if action_state.pressed(Action::Left) {
-            vel.0 -= acceleration.0;
-            // cap velocity to -1500
-            if vel.0 < -1500.0 {
-                vel.0 = -1500.0;
-            }
+            vel.linvel.x -= acceleration.0;
         }
         if action_state.pressed(Action::Down) {
-            vel.1 -= acceleration.0;
-            // cap velocity to -1500
-            if vel.1 < -1500.0 {
-                vel.1 = -1500.0;
-            }
+            vel.linvel.y -= acceleration.0;
         }
         if action_state.pressed(Action::Up) {
-            vel.1 += acceleration.0;
-            // cap velocity to 1500
-            if vel.1 > 1500.0 {
-                vel.1 = 1500.0;
-            }
+            vel.linvel.y += acceleration.0;
         }
 
         // if (rotating.0 == RotatingM::AntiClockwise
@@ -304,7 +296,6 @@ fn movement(
 
         // transform.translation.y += velocity.1 * delta_time;
         // velocity.1 *= 1.0 - friction;
-        impulse.impulse = Vec2::new(vel.0, vel.1);
 
         // // ensure transform.translation.0 is in bounds, and reset velocittransform.translation.1if it is
         // if transform.translation.x < width / 2.0 {
@@ -354,6 +345,7 @@ fn discord_update(discord: Option<NonSendMut<DiscordState>>) {
     let activity = activity
         // party status
         .with_state("idle")
+        .with_large_image_key("logo")
         .with_large_image_key("logo")
         // player status
         .with_details("in the menus");
