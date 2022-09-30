@@ -114,23 +114,23 @@ fn setup(
     let noto_sans: Handle<Font> =
         server.load("Noto_Sans_Mono/NotoSansMono-VariableFont_wdth,wght.ttf");
 
-    commands.spawn_bundle(Text2dBundle {
-        // set font
-        text: Text::from_section(
-            "/ppɒŋ/",
-            TextStyle {
-                font: noto_sans,
-                font_size: 40.0,
-                color: Color::WHITE,
-            },
+    // commands.spawn_bundle(Text2dBundle {
+    //     // set font
+    //     text: Text::from_section(
+    //         "/ppɒŋ/",
+    //         TextStyle {
+    //             font: noto_sans,
+    //             font_size: 40.0,
+    //             color: Color::WHITE,
+    //         },
 
-        ),
-        transform:
-        // centre of screen
-        Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+    //     ),
+    //     transform:
+    //     // centre of screen
+    //     Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
 
-        ..Default::default()
-    });
+    //     ..Default::default()
+    // });
 }
 fn setup_game(mut commands: Commands) {
     let default_map = InputMap::new([
@@ -141,6 +141,12 @@ fn setup_game(mut commands: Commands) {
         (KeyCode::C, Action::RotateAntiClockwise),
         (KeyCode::V, Action::RotateClockwise),
     ]);
+    commands
+        .spawn()
+        .insert(RigidBody::Dynamic)
+        .insert(Collider::ball(15.0))
+        .insert(Restitution::coefficient(0.7))
+        .insert_bundle(TransformBundle::from(Transform::from_xyz(50.0, 0.0, 0.0)));
 
     for _ in 0..1 {
         // let mut commands = world.get_resource_mut::<Commands>().unwrap();
@@ -192,12 +198,15 @@ fn movement(
             &mut NextStop,
             &mut Rotating,
             &mut Velocity,
+            &mut Transform,
         ),
         With<Paddle>,
     >,
     _time: Res<Time>,
 ) {
-    for (action_state, acceleration, mut next_stop, mut rotating, mut vel) in query.iter_mut() {
+    for (action_state, acceleration, mut next_stop, mut rotating, mut vel, mut transform) in
+        query.iter_mut()
+    {
         // let delta_time = 16.0 / 1000.0;
         // let friction = 0.1;
         // // cpnvert to degrees
@@ -215,6 +224,8 @@ fn movement(
         // let _rot_accel = 0.8;
         // let (width, _height) = (10.0, 10.0);
         // let mut vel = (0.0, 0.0);
+        // let rotation = transform.rotation;
+        println!("rotation: {}", rotation.to_degrees());
 
         if action_state.pressed(Action::Right) {
             vel.linvel.x += acceleration.0;
@@ -274,7 +285,7 @@ fn movement(
         //     next_stop.0, rotation, rotation_velocity.0
         // );
         // // TODO: fix this (lol have fun)
-        // transform.rotate_z(rotation_velocity.0 * std::f32::consts::PI / 180.0);
+        transform.rotate_z(2_f32.to_radians());
 
         // // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
         // // println!(
