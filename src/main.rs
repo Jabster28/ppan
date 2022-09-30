@@ -210,7 +210,43 @@ fn movement(
         // let delta_time = 16.0 / 1000.0;
         // let friction = 0.1;
         // // cpnvert to degrees
-        // let rotation = transform.rotation.xyz().z;
+        let mut rotation_deg = 180.0 - transform.rotation.to_euler(EulerRot::YXZ).2.to_degrees();
+        // if the diff between rotation and the next stop is less than .1, set the rotation to the next stop
+        if ((rotating.0 == RotatingM::AntiClockwise || rotating.0 == RotatingM::Clockwise)
+            && (rotation_deg - next_stop.0).abs() < 20.0)
+        {
+            rotating.0 = RotatingM::Neither;
+        }
+
+        if rotating.0 == RotatingM::Clockwise && rotating.0 == RotatingM::AntiClockwise {
+            // only keep cw
+            rotating.0 = RotatingM::Clockwise;
+        }
+
+        if action_state.pressed(Action::RotateAntiClockwise) {
+            rotating.0 = RotatingM::AntiClockwise;
+            // get next 90 degree rotation to the left
+            next_stop.0 = 90.0 * (rotation_deg / 90.0).round() - 90.0;
+            while next_stop.0 < 0.0 {
+                next_stop.0 += 360.0;
+            }
+            next_stop.0 %= 360.0;
+        }
+
+        if action_state.pressed(Action::RotateClockwise) {
+            rotating.0 = RotatingM::Clockwise;
+            // get next 90 degree rotation to the right
+            next_stop.0 = 90.0 * (rotation_deg / 90.0).round() + 90.0;
+            while next_stop.0 < 0.0 {
+                next_stop.0 += 360.0;
+            }
+            next_stop.0 %= 360.0;
+        }
+        if (rotation_deg - next_stop.0).abs() < 0.1 {
+            transform.rotate_z((next_stop.0 - rotation_deg).to_radians());
+            rotation_deg = next_stop.0;
+            rotating.0 = RotatingM::Neither;
+        }
         // let rotation = {
         //     let mut newrot = rotation;
         //     while newrot < 0.0 {
@@ -225,8 +261,6 @@ fn movement(
         // let (width, _height) = (10.0, 10.0);
         // let mut vel = (0.0, 0.0);
         // let rotation = transform.rotation;
-        println!("rotation: {}", rotation.to_degrees());
-
         if action_state.pressed(Action::Right) {
             vel.linvel.x += acceleration.0;
         }
@@ -239,53 +273,35 @@ fn movement(
         if action_state.pressed(Action::Up) {
             vel.linvel.y += acceleration.0;
         }
+        if (rotation_deg - next_stop.0).abs() > 0.5 {
+            let displacement_cw = 360.0 - (rotation_deg - next_stop.0);
+            let displacement_ccw = -(rotation_deg - next_stop.0);
 
-        // if (rotating.0 == RotatingM::AntiClockwise
-        //     && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0)
-        //     || (rotating.0 == RotatingM::Clockwise
-        //         && (rotation * 180.0 / std::f32::consts::PI - next_stop.0).abs() < 30.0)
-        // {
-        //     rotating.0 = RotatingM::Neither;
-        // }
+            let displacement = match rotating.0 {
+                RotatingM::Neither => {
+                    // go for the closest one
+                    if (displacement_cw).abs() < (displacement_ccw).abs() {
+                        displacement_cw
+                    } else {
+                        displacement_ccw
+                    }
+                }
+                RotatingM::Clockwise => displacement_cw,
+                RotatingM::AntiClockwise => displacement_ccw,
+            };
 
-        // if rotating.0 == RotatingM::Clockwise && rotating.0 == RotatingM::AntiClockwise {
-        //     // only keep cw
-        //     rotating.0 = RotatingM::Clockwise;
-        // }
+            let mut rotation_velocity = (2.0 * 0.00006 * displacement.abs()).sqrt();
+            if displacement < 0.0 {
+                rotation_velocity *= -1.0;
+            }
+            println!(
+                "nxs {} disp {} vel {}",
+                next_stop.0, displacement, rotation_velocity
+            );
 
-        // if action_state.pressed(Action::RotateAntiClockwise) {
-        //     rotating.0 = RotatingM::AntiClockwise;
-        //     // get next 90 degree rotation to the left
-        //     next_stop.0 =
-        //         (90.0 * ((rotation * 180.0 / std::f32::consts::PI) / 90.0).floor()) as f32;
-        //     if (next_stop.0 - (rotation * 180.0 / std::f32::consts::PI)).abs() < f32::EPSILON {
-        //         next_stop.0 -= 90.0;
-        //     }
-        //     while next_stop.0 < 0.0 {
-        //         next_stop.0 += 360.0;
-        //     }
-        //     next_stop.0 %= 360.0;
-        // }
-
-        // if action_state.pressed(Action::RotateClockwise) {
-        //     rotating.0 = RotatingM::Clockwise;
-
-        //     // get next 90 degree rotation to the right
-        //     next_stop.0 = (90.0 * (rotation * 180.0 / std::f32::consts::PI / 90.0).ceil()) as f32;
-        //     // check if same
-        //     if (next_stop.0 - rotation * 180.0 / std::f32::consts::PI).abs() < f32::EPSILON {
-        //         next_stop.0 += 90.0;
-        //     }
-        //     next_stop.0 %= 360.0;
-        // }
-
-        // // #[cfg(debug_assertions)]
-        // println!(
-        //     "next stop is {}, i'm at {} so i wanna set velocity to {}",
-        //     next_stop.0, rotation, rotation_velocity.0
-        // );
-        // // TODO: fix this (lol have fun)
-        transform.rotate_z(2_f32.to_radians());
+            transform.rotate_z(-rotation_velocity);
+        }
+        // TODO: fix this (lol have fun)
 
         // // if the paddle's rotating right, its rotational velocity should also decrease as it reaches the next 90 degree mark
         // // println!(
@@ -323,7 +339,7 @@ fn movement(
         // } else if transform.translation.y > 600.0 {
         //     transform.translation.y = 600.0;
         //     velocity.1 = 0.0;
-        // }
+        // } BN KL LLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLLL,L ,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,,.M  `Z
     }
 }
 #[cfg(feature = "discord")]
