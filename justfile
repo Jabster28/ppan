@@ -42,7 +42,9 @@ linux:
 # you'll need to install dylibbundler (brew install dylibbundler)
 macos:
     cargo install cargo-bundle
+    magick ppan.png -sample 1028x1028 512x512@2x.png
     . ./env.sh && cargo bundle --release --all-features
+    rm 512x512@2x.png
     . ./env.sh && dylibbundler --search-path $DISCORD_GAME_SDK_PATH/lib/x86_64  -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/libs
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
     cp .itch.toml dist/
