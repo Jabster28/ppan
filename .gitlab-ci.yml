@@ -1,4 +1,4 @@
-image: "rust:latest"
+image: "rustlang/rust:nightly"
 
 variables:
   CARGO_HOME: ".cargo/"
@@ -7,8 +7,8 @@ default:
   before_script:
     - rustc --version
     - cargo --version
-    - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils -qq
-    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+    - apt-get update -qq && apt-get install libudev-dev libasound2-dev alsa-utils lsb-release software-properties-common llvm clang-11 lld -qq
+    - curl --proto '=https' --tlsv1.2 -sSf https://just.systems/install.sh | bash -s -- --to /usr/local/bin || true
     - export PATH="$CI_PROJECT_DIR/.cargo/bin:$PATH"
 
 cache:
@@ -20,17 +20,6 @@ stages:
   - test
   - build
   - release
-
-compile:
-  rules:
-    - if: '$CI_COMMIT_TAG =~ /^\d+\.\d+\.\d+/'
-      when: never
-  stage: build
-  script:
-    - cargo build --release
-  artifacts:
-    paths:
-      - target/release/ppan
 
 publish-beta:
   rules:
@@ -62,9 +51,18 @@ test-code:
     - rustup component add rustfmt
     - cargo fmt -- --check
     - rustup component add clippy
-    - cargo clippy -- -D warnings
     - cargo install junitify
     - cargo test -- --format=json -Z unstable-options --report-time | junitify --out $CI_PROJECT_DIR/tests/
+    - cargo install gitlab_clippy
+    - cargo clippy --message-format=json -- -W clippy::pedantic | gitlab-clippy > tests/gl-code-quality-report.json
+  artifacts:
+    when: always
+    paths:
+      - tests/*
+    reports:
+      junit: tests/*.xml
+      codequality: tests/gl-code-quality-report.json
+
 
 
 publish-macos:
