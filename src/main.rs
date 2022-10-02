@@ -143,6 +143,31 @@ fn setup_game(mut commands: Commands) {
     ]);
     commands
         .spawn()
+        .insert(RigidBody::Fixed)
+        .insert(Collider::cuboid(0.0, 1000.0))
+        .insert(Restitution::coefficient(0.0))
+        .insert_bundle(TransformBundle::from(Transform::from_xyz(-500.0, 0.0, 0.0)));
+    commands
+        .spawn()
+        .insert(RigidBody::Fixed)
+        .insert(Collider::cuboid(0.0, 1000.0))
+        .insert(Restitution::coefficient(0.0))
+        .insert_bundle(TransformBundle::from(Transform::from_xyz(500.0, 0.0, 0.0)));
+    commands
+        .spawn()
+        .insert(RigidBody::Fixed)
+        .insert(Collider::cuboid(1000.0, 0.0))
+        .insert(Restitution::coefficient(0.0))
+        .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, -250.0, 0.0)));
+    commands
+        .spawn()
+        .insert(RigidBody::Fixed)
+        .insert(Collider::cuboid(1000.0, 0.0))
+        .insert(Restitution::coefficient(0.0))
+        .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 250.0, 0.0)));
+
+    commands
+        .spawn()
         .insert(RigidBody::Dynamic)
         .insert(Collider::ball(15.0))
         .insert(Restitution::coefficient(0.7))
