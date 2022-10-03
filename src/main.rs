@@ -69,6 +69,48 @@ struct PaddleBundle {
     sprite: SpriteBundle,
 }
 
+struct BallHitIncrease;
+impl PhysicsHooksWithQuery<NoUserData> for BallHitIncrease {
+    fn modify_solver_contacts(
+        &self,
+        context: ContactModificationContextView,
+        _user_data: &Query<NoUserData>,
+    ) {
+        // This is a silly example of contact modifier that does silly things
+        // for illustration purpose:
+        // - Flip all the contact normals.
+        // - Delete the first contact.
+        // - Set the friction coefficients to 0.3
+        // - Set the restitution coefficients to 0.4
+        // - Set the tangent velocities to X * 10.0
+        // *context.normal = -*context.normal;
+
+        // if !context.solver_contacts.is_empty() {
+        //     context.solver_contacts.swap_remove(0);
+        // }
+
+        // for solver_contact in &mut *context.solver_contacts {
+        //     solver_contact.friction = 0.3;
+        //     solver_contact.restitution = 0.4;
+        //     solver_contact.tangent_velocity.x = 10.0;
+        // }
+
+        // // Use the persistent user-data to count the number of times
+        // // contact modification was called for this contact manifold
+        // // since its creation.
+        // *context.user_data += 1;
+        // println!(
+        //     "Contact manifold has been modified {} times since its creation.",
+        //     *context.user_data
+        // );
+        println!(
+            "yo something happened between {} and {}",
+            context.rigid_body1().unwrap().id(),
+            context.rigid_body2().unwrap().id()
+        );
+    }
+}
+
 fn main() {
     let mut app = App::new();
     app.add_plugins(DefaultPlugins)
@@ -165,12 +207,13 @@ fn setup_game(mut commands: Commands) {
         .insert(Collider::cuboid(1000.0, 0.0))
         .insert(Restitution::coefficient(0.0))
         .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 250.0, 0.0)));
-
+    commands.insert_resource(PhysicsHooksWithQueryResource(Box::new(BallHitIncrease {})));
     commands
         .spawn()
         .insert(RigidBody::Dynamic)
         .insert(Collider::ball(15.0))
-        .insert(Restitution::coefficient(0.7))
+        .insert(ActiveHooks::MODIFY_SOLVER_CONTACTS)
+        .insert(Restitution::coefficient(1.2))
         .insert_bundle(TransformBundle::from(Transform::from_xyz(50.0, 0.0, 0.0)));
 
     for _ in 0..1 {
