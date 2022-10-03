@@ -69,7 +69,9 @@ struct PaddleBundle {
     sprite: SpriteBundle,
 }
 
-struct BallHitIncrease;
+struct BallHitIncrease {
+    paddles: Vec<Entity>,
+}
 impl PhysicsHooksWithQuery<NoUserData> for BallHitIncrease {
     fn modify_solver_contacts(
         &self,
@@ -108,6 +110,19 @@ impl PhysicsHooksWithQuery<NoUserData> for BallHitIncrease {
             context.rigid_body1().unwrap().id(),
             context.rigid_body2().unwrap().id()
         );
+        if self
+            .paddles
+            .iter()
+            .any(|x| &x.id() == &context.rigid_body2().unwrap().id())
+        {
+            println!("paddle hit");
+            // triple the velocity
+            for solver_contact in &mut *context.raw.solver_contacts {
+                solver_contact.restitution = 5.0;
+                solver_contact.tangent_velocity.x = 10.0;
+            }
+        }
+        // println!("{}", context.raw.rigid_body1.unwrap())
     }
 }
 
@@ -207,7 +222,7 @@ fn setup_game(mut commands: Commands) {
         .insert(Collider::cuboid(1000.0, 0.0))
         .insert(Restitution::coefficient(0.0))
         .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 250.0, 0.0)));
-    commands.insert_resource(PhysicsHooksWithQueryResource(Box::new(BallHitIncrease {})));
+
     commands
         .spawn()
         .insert(RigidBody::Dynamic)
@@ -215,10 +230,11 @@ fn setup_game(mut commands: Commands) {
         .insert(ActiveHooks::MODIFY_SOLVER_CONTACTS)
         .insert(Restitution::coefficient(1.2))
         .insert_bundle(TransformBundle::from(Transform::from_xyz(50.0, 0.0, 0.0)));
+    let mut paddles = vec![];
 
     for _ in 0..1 {
         // let mut commands = world.get_resource_mut::<Commands>().unwrap();
-        commands
+        let id = commands
             .spawn_bundle(PaddleBundle {
                 rotation_velocity: RotationVelocity(0.0),
                 acceleration: Acceleration(60.0),
@@ -251,11 +267,16 @@ fn setup_game(mut commands: Commands) {
                 angvel: 0.0,
             })
             .insert(Collider::cuboid(15.0, 75.0))
-            .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
+            .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)))
+            .id();
+        paddles.push(id)
         // world.resource_scope(|_, mut table: Mut<Table>| {
         // table.paddles[i].push(paddle);
         // });
     }
+    commands.insert_resource(PhysicsHooksWithQueryResource(Box::new(BallHitIncrease {
+        paddles: paddles,
+    })));
 }
 
 fn movement(
