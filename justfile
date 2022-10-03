@@ -45,7 +45,7 @@ macos:
     magick ppan.png -sample 1028x1028 512x512@2x.png
     . ./env.sh && cargo bundle --release --all-features
     rm 512x512@2x.png
-    . ./env.sh && dylibbundler --search-path $DISCORD_GAME_SDK_PATH/lib/x86_64  -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/libs
+    . ./env.sh && dylibbundler --search-path $DISCORD_GAME_SDK_PATH/lib/x86_64  -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/Frameworks -p @executable_path/../Frameworks/
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
     cp .itch.toml dist/
     cp -r target/release/bundle/osx/ppan.app dist/
