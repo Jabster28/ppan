@@ -1,0 +1,5 @@
+[[actions]]
+name = "play"
+path = "ppan"
+platform = "linux"
+scope = "profile:me"

@@ -32,7 +32,7 @@ linux:
     mkdir -p dist/assets
     cargo install copydeps
     cp -r assets dist/
-    cp .itch.toml dist/
+    cp itch/linux.itch.toml dist/.itch.toml
     cp target/release/ppan dist/ppan.{{arch()}}
     cp ppan.sh dist/ppan
     mkdir -p dist/{{arch()}}
@@ -47,7 +47,7 @@ macos:
     rm 512x512@2x.png
     . ./env.sh && dylibbundler --search-path $DISCORD_GAME_SDK_PATH/lib/x86_64  -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/Frameworks -p @executable_path/../Frameworks/
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
-    cp .itch.toml dist/
+    cp itch/macos.itch.toml dist/.itch.toml
     cp -r target/release/bundle/osx/ppan.app dist/
 
 # publishes to itch
@@ -68,7 +68,7 @@ win:
     rustup target add x86_64-pc-windows-gnu
     cargo build --target x86_64-pc-windows-gnu --release
     cp -r assets dist/
-    cp .itch.toml dist/
+    cp itch/win.itch.toml dist/.itch.toml
     cp target/x86_64-pc-windows-gnu/release/ppan.exe dist/
 
 publish-win version: win butler
