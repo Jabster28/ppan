@@ -102,8 +102,8 @@ fn setup(
     server.watch_for_changes().unwrap();
 
     server_settings.asset_folder =
-    // chanegs for each os
-    if cfg!(target_os = "windows") || cfg!(target_os = "linux") || cfg!(debug_asdsertions){
+    // changes for each os
+    if cfg!(target_os = "windows") || cfg!(target_os = "linux") || cfg!(debug_assertions){
         "assets"
     } else if cfg!(target_os = "macos") {
         "../Resources/assets"
