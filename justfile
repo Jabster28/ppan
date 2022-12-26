@@ -37,6 +37,9 @@ linux:
     cp ppan.sh dist/ppan
     mkdir -p dist/{{arch()}}
     -. ./env.sh && copydeps --search-dir $DISCORD_GAME_SDK_PATH/lib/x86_64 target/release/ppan dist/{{arch()}}
+    cd dist/{{arch()}}
+    rm -f libc.so.* libm.so.* libdl.so.* librt.so.* libpthread.so.* libgcc_s.so.*
+    cd ../..
 
 
 # you'll need to install dylibbundler (brew install dylibbundler)
