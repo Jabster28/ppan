@@ -4,6 +4,7 @@ use bevy_rapier2d::prelude::{Velocity, *};
 #[cfg(feature = "discord")]
 use discord_game_sdk::Discord;
 // mod input_handlers;
+use bevy_egui::{egui, EguiContext, EguiPlugin};
 use leafwing_input_manager::prelude::*;
 
 #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
@@ -16,10 +17,8 @@ enum Action {
     RotateAntiClockwise,
 }
 
-use bevy_asset::{AssetServer, AssetServerSettings, Handle};
+use bevy_asset::{AssetServer, Handle};
 #[cfg(debug_assertions)]
-use bevy_editor_pls::prelude::*;
-
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 enum AppState {
     MainMenu,
@@ -130,46 +129,71 @@ struct PaddleBundle {
 
 fn main() {
     let mut app = App::new();
-    app.add_plugins(DefaultPlugins)
-        .add_plugin(InputManagerPlugin::<Action>::default())
-        .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0))
-        .add_plugin(RapierDebugRenderPlugin::default())
-        .add_state(AppState::InGame)
-        .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
-        .add_startup_system(setup)
-        // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
-        .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement))
+    app.add_plugins(
+        DefaultPlugins.set(AssetPlugin {
+            watch_for_changes: true,
+            asset_folder: if cfg!(target_os = "windows")
+                || cfg!(target_os = "linux")
+                || cfg!(debug_assertions)
+            {
+                "assets"
+            } else if cfg!(target_os = "macos") {
+                "../Resources/assets"
+            } else {
+                panic!("unsupported os")
+            }
+            .to_string(),
+            ..default()
+        }),
+    )
+    .add_plugin(EguiPlugin)
+    .add_plugin(InputManagerPlugin::<Action>::default())
+    .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0))
+    .add_plugin(RapierDebugRenderPlugin::default())
+    .add_state(AppState::MainMenu)
+    .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
+    .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(ui))
+    .add_startup_system(setup)
+    // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
+    .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement));
         .add_system(ball_collision_detection);
     // if debug
-    #[cfg(debug_assertions)]
-    app.add_plugin(EditorPlugin);
+    // #[cfg(debug_assertions)]
+    // app.add_plugin(EditorPlugin);
     #[cfg(feature = "discord")]
-    app.add_startup_system(setup_discord.exclusive_system())
+    app.add_startup_system(setup_discord)
         .add_system(discord_update);
 
     app.run();
 }
 
+fn ui(mut egui_context: ResMut<EguiContext>, mut app_state: ResMut<State<AppState>>) {
+    egui::Window::new("main menu").show(egui_context.ctx_mut(), |ui| {
+        ui.label("hi");
+        if ui.button("start game").clicked() {
+            app_state.set(AppState::InGame).unwrap();
+        }
+    });
+}
+
 fn setup(
     mut commands: Commands,
-    mut server_settings: ResMut<AssetServerSettings>,
     mut rapier_config: ResMut<RapierConfiguration>,
     server: Res<AssetServer>,
 ) {
     rapier_config.gravity = Vec2::new(0.0, 0.0);
     commands.spawn_bundle(Camera2dBundle::default());
-    #[cfg(debug_assertions)]
-    server.watch_for_changes().unwrap();
+    // server.().unwrap();
 
-    server_settings.asset_folder =
-    // changes for each os
-    if cfg!(target_os = "windows") || cfg!(target_os = "linux") || cfg!(debug_assertions){
-        "assets"
-    } else if cfg!(target_os = "macos") {
-        "../Resources/assets"
-    } else {
-        panic!("unsupported os")
-    }.to_string();
+    // server_settings.asset_folder =
+    // // changes for each os
+    // if cfg!(target_os = "windows") || cfg!(target_os = "linux") || cfg!(debug_assertions){
+    //     "assets"
+    // } else if cfg!(target_os = "macos") {
+    //     "../Resources/assets"
+    // } else {
+    //     panic!("unsupported os")
+    // }.to_string();
     let blazma: Handle<Font> = server.load("Blazma/Blazma-Regular.ttf");
     let noto_sans: Handle<Font> =
         server.load("Noto_Sans_Mono/NotoSansMono-VariableFont_wdth,wght.ttf");
@@ -203,32 +227,28 @@ fn setup_game(mut commands: Commands) {
         (KeyCode::V, Action::RotateClockwise),
     ]);
     commands
-        .spawn()
+        .spawn(TransformBundle::from(Transform::from_xyz(-500.0, 0.0, 0.0)))
         .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(50.0, 1000.0))
-        .insert(Restitution::coefficient(0.0))
-        .insert_bundle(TransformBundle::from(Transform::from_xyz(-500.0, 0.0, 0.0)));
+        .insert(Collider::cuboid(0.0, 1000.0))
+        .insert(Restitution::coefficient(0.0));
     commands
-        .spawn()
+        .spawn(TransformBundle::from(Transform::from_xyz(500.0, 0.0, 0.0)))
         .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(50.0, 1000.0))
-        .insert(Restitution::coefficient(0.0))
-        .insert_bundle(TransformBundle::from(Transform::from_xyz(500.0, 0.0, 0.0)));
+        .insert(Collider::cuboid(0.0, 1000.0))
+        .insert(Restitution::coefficient(0.0));
     commands
-        .spawn()
+        .spawn(TransformBundle::from(Transform::from_xyz(0.0, -250.0, 0.0)))
         .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(1000.0, 50.0))
-        .insert(Restitution::coefficient(0.0))
-        .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, -250.0, 0.0)));
+        .insert(Collider::cuboid(1000.0, 0.0))
+        .insert(Restitution::coefficient(0.0));
     commands
-        .spawn()
+        .spawn(TransformBundle::from(Transform::from_xyz(0.0, 250.0, 0.0)))
         .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(1000.0, 50.0))
-        .insert(Restitution::coefficient(0.0))
-        .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 250.0, 0.0)));
+        .insert(Collider::cuboid(1000.0, 0.0))
+        .insert(Restitution::coefficient(0.0));
 
     commands
-        .spawn()
+        .spawn(TransformBundle::from(Transform::from_xyz(50.0, 0.0, 0.0)))
         .insert(RigidBody::Dynamic)
         .insert(Ball)
         .insert(Collider::ball(15.0))
