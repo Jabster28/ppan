@@ -155,8 +155,8 @@ fn main() {
     .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(ui))
     .add_startup_system(setup)
     // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
-    .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement));
-        .add_system(ball_collision_detection);
+    .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement))
+    .add_system(ball_collision_detection);
     // if debug
     // #[cfg(debug_assertions)]
     // app.add_plugin(EditorPlugin);
