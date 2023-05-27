@@ -18,7 +18,6 @@ enum Action {
 }
 
 use bevy_asset::{AssetServer, Handle};
-#[cfg(debug_assertions)]
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default, States)]
 enum AppState {
     #[default]
