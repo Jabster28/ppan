@@ -4,6 +4,6 @@
     "ppan"
   ],
   "rust-analyzer.cargo.features": [
-    "bevy/dynamic"
+    "bevy/dynamic_linking"
   ]
 }

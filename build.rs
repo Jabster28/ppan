@@ -13,9 +13,9 @@ fn main() {
             .trim()
             .to_string(),
         Err(e) => {
-            eprintln!("Failed to get git tag: {}", e);
+            eprintln!("Failed to get git tag: {e}");
             exit(1);
         }
     };
-    println!("{}CURRENT_TAG={}", CARGOENV, tag);
+    println!("{CARGOENV}CURRENT_TAG={tag}");
 }
