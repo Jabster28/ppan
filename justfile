@@ -1,3 +1,4 @@
+set shell := ["bash", "-uc"]
 default:
   just --list
 test:
