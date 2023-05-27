@@ -1,10 +1,10 @@
 use bevy::prelude::*;
-use bevy_inspector_egui::Inspectable;
+// use bevy_inspector_egui::Inspectable;
 use bevy_rapier2d::prelude::{Velocity, *};
 #[cfg(feature = "discord")]
 use discord_game_sdk::Discord;
 // mod input_handlers;
-use bevy_egui::{egui, EguiContext, EguiPlugin};
+use bevy_egui::{egui, EguiContexts, EguiPlugin};
 use leafwing_input_manager::prelude::*;
 
 #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
@@ -19,8 +19,9 @@ enum Action {
 
 use bevy_asset::{AssetServer, Handle};
 #[cfg(debug_assertions)]
-#[derive(Debug, Clone, Eq, PartialEq, Hash)]
+#[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default, States)]
 enum AppState {
+    #[default]
     MainMenu,
     InGame,
     Paused,
@@ -29,7 +30,7 @@ enum AppState {
 
 struct DiscordState<'a>(Discord<'a, ()>);
 
-#[derive(PartialEq, Inspectable, Reflect, Default, Clone, Debug)]
+#[derive(PartialEq, Reflect, Default, Clone, Debug)]
 
 enum RotatingM {
     Clockwise,
@@ -42,21 +43,21 @@ struct Paddle;
 #[derive(Component)]
 struct Ball;
 
-#[derive(Inspectable, Component)]
+#[derive(Component)]
 struct RotationVelocity(f32);
 
-#[derive(Inspectable, Component)]
+#[derive(Component)]
 struct Acceleration(f32);
-#[derive(Inspectable, Component)]
+#[derive(Component)]
 struct RotAcceleration(f32);
 
-#[derive(Inspectable, Component, Reflect, Default)]
+#[derive(Component, Reflect, Default)]
 #[reflect(Component)]
 struct NextStop(f32);
 
 #[derive(Reflect, Default)]
 #[reflect(Component)]
-#[derive(Inspectable, Component)]
+#[derive(Component)]
 struct Rotating(RotatingM);
 
 #[derive(Bundle)]
@@ -143,19 +144,21 @@ fn main() {
                 panic!("unsupported os")
             }
             .to_string(),
-            ..default()
         }),
     )
     .add_plugin(EguiPlugin)
     .add_plugin(InputManagerPlugin::<Action>::default())
     .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0))
     .add_plugin(RapierDebugRenderPlugin::default())
-    .add_state(AppState::MainMenu)
-    .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
-    .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(ui))
+    .add_state::<AppState>()
+    // .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
+    .add_system(setup_game.in_schedule(OnEnter(AppState::InGame)))
+    // .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(ui))
+    .add_system(ui.in_set(OnUpdate(AppState::MainMenu)))
     .add_startup_system(setup)
     // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
-    .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement))
+    // .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement))
+    .add_system(movement.in_set(OnUpdate(AppState::InGame)))
     .add_system(ball_collision_detection);
     // if debug
     // #[cfg(debug_assertions)]
@@ -167,11 +170,11 @@ fn main() {
     app.run();
 }
 
-fn ui(mut egui_context: ResMut<EguiContext>, mut app_state: ResMut<State<AppState>>) {
+fn ui(mut egui_context: EguiContexts, mut app_state: ResMut<NextState<AppState>>) {
     egui::Window::new("main menu").show(egui_context.ctx_mut(), |ui| {
         ui.label("hi");
         if ui.button("start game").clicked() {
-            app_state.set(AppState::InGame).unwrap();
+            app_state.set(AppState::InGame);
         }
     });
 }
@@ -182,7 +185,7 @@ fn setup(
     server: Res<AssetServer>,
 ) {
     rapier_config.gravity = Vec2::new(0.0, 0.0);
-    commands.spawn_bundle(Camera2dBundle::default());
+    commands.spawn(Camera2dBundle::default());
     // server.().unwrap();
 
     // server_settings.asset_folder =
@@ -194,8 +197,8 @@ fn setup(
     // } else {
     //     panic!("unsupported os")
     // }.to_string();
-    let blazma: Handle<Font> = server.load("Blazma/Blazma-Regular.ttf");
-    let noto_sans: Handle<Font> =
+    let _blazma: Handle<Font> = server.load("Blazma/Blazma-Regular.ttf");
+    let _noto_sans: Handle<Font> =
         server.load("Noto_Sans_Mono/NotoSansMono-VariableFont_wdth,wght.ttf");
 
     // commands.spawn_bundle(Text2dBundle {
@@ -263,12 +266,12 @@ fn setup_game(mut commands: Commands) {
         })
         .insert(ActiveEvents::COLLISION_EVENTS)
         .insert(ActiveCollisionTypes::all())
-        .insert_bundle(TransformBundle::from(Transform::from_xyz(400.0, 0.0, 0.0)));
+        .insert(TransformBundle::from(Transform::from_xyz(400.0, 0.0, 0.0)));
 
     for _ in 0..1 {
         // let mut commands = world.get_resource_mut::<Commands>().unwrap();
         commands
-            .spawn_bundle(PaddleBundle {
+            .spawn(PaddleBundle {
                 flags: ActiveEvents::COLLISION_EVENTS,
                 active_collision_types: ActiveCollisionTypes::default(),
                 rotation_velocity: RotationVelocity(0.0),
@@ -286,7 +289,7 @@ fn setup_game(mut commands: Commands) {
                 },
             })
             .insert(Paddle)
-            .insert_bundle(InputManagerBundle::<Action> {
+            .insert(InputManagerBundle::<Action> {
                 // Stores "which actions are currently pressed"
                 action_state: ActionState::default(),
                 // Describes how to convert from player inputs into those actions
@@ -303,7 +306,7 @@ fn setup_game(mut commands: Commands) {
             })
             .insert(Collider::cuboid(15.0, 75.0))
             .insert(CollidingEntities::default())
-            .insert_bundle(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
+            .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
         // world.resource_scope(|_, mut table: Mut<Table>| {
         // table.paddles[i].push(paddle);
         // });
@@ -326,7 +329,6 @@ fn movement(
         ),
         With<Paddle>,
     >,
-    _time: Res<Time>,
 ) {
     for (
         action_state,
@@ -341,8 +343,8 @@ fn movement(
         // convert to degrees
         let mut rotation_deg = 180.0 - transform.rotation.to_euler(EulerRot::YXZ).2.to_degrees();
         // if the diff between rotation and the next stop is less than .1, set the rotation to the next stop
-        if ((rotating.0 == RotatingM::AntiClockwise || rotating.0 == RotatingM::Clockwise)
-            && (rotation_deg - next_stop.0).abs() < 20.0)
+        if (rotating.0 == RotatingM::AntiClockwise || rotating.0 == RotatingM::Clockwise)
+            && (rotation_deg - next_stop.0).abs() < 20.0
         {
             rotating.0 = RotatingM::Neither;
         }
@@ -403,29 +405,29 @@ fn movement(
             vel.linvel.y += acceleration.0;
         }
         if (rotation_deg - next_stop.0).abs() > 2.0 {
-            let displacement_cw = if rotation_deg < next_stop.0 {
+            let displacement_clockwise = if rotation_deg < next_stop.0 {
                 next_stop.0 - rotation_deg
             } else {
                 next_stop.0 + (360.0 - rotation_deg)
             };
-            let displacement_ccw = if rotation_deg > next_stop.0 {
+            let displacement_counterclockwise = if rotation_deg > next_stop.0 {
                 next_stop.0 - rotation_deg
             } else {
                 next_stop.0 - rotation_deg - 360.0
             };
-            println!("{}d {} {}", rotation_deg, displacement_cw, displacement_ccw);
+            println!("{rotation_deg}d {displacement_clockwise} {displacement_counterclockwise}");
 
             let displacement = match rotating.0 {
                 RotatingM::Neither => {
                     // go for the closest one
-                    if (displacement_cw).abs() < (displacement_ccw).abs() {
-                        displacement_cw
+                    if (displacement_clockwise).abs() < (displacement_counterclockwise).abs() {
+                        displacement_clockwise
                     } else {
-                        displacement_ccw
+                        displacement_counterclockwise
                     }
                 }
-                RotatingM::Clockwise => displacement_cw,
-                RotatingM::AntiClockwise => displacement_ccw,
+                RotatingM::Clockwise => displacement_clockwise,
+                RotatingM::AntiClockwise => displacement_counterclockwise,
             };
 
             let mut rotation_velocity = (2.0 * rot_acceleration.0 * displacement.abs()).sqrt();

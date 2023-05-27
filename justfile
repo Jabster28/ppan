@@ -6,7 +6,7 @@ test:
     cargo clippy -- -W clippy::pedantic
 
 run:
-    cargo run --features bevy/dynamic
+    cargo run --features bevy/dynamic_linking
 
 build:
     @touch discord_game_sdk/c/discord_game_sdk.h || just discord_sdk

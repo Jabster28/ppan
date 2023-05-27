@@ -20,6 +20,13 @@ stages:
   - test
   - build
   - release
+bleeding:
+  stage: build
+  script:
+    - just package
+  artifacts:
+    paths:
+      - dist
 
 publish-beta:
   rules:
