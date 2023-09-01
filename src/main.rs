@@ -153,7 +153,7 @@ fn main() {
     // .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
     .add_system(setup_game.in_schedule(OnEnter(AppState::InGame)))
     // .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(ui))
-    .add_system(ui.in_set(OnUpdate(AppState::MainMenu)))
+    .add_system(button_system.in_set(OnUpdate(AppState::MainMenu)))
     .add_startup_system(setup)
     // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
     // .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement))
@@ -168,14 +168,44 @@ fn main() {
 
     app.run();
 }
+const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
+const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
+const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
+
+fn button_system(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &Children),
+        (Changed<Interaction>, With<Button>),
+    >,
+    mut text_query: Query<&mut Text>,
+    mut app_state: ResMut<NextState<AppState>>,
+) {
+    for (interaction, mut color, children) in &mut interaction_query {
+        let mut text = text_query.get_mut(children[0]).unwrap();
+        match *interaction {
+            Interaction::Clicked => {
+                text.sections[0].value = "Press".to_string();
+                *color = PRESSED_BUTTON.into();
+            }
+            Interaction::Hovered => {
+                text.sections[0].value = "Hover".to_string();
+                *color = HOVERED_BUTTON.into();
+            }
+            Interaction::None => {
+                text.sections[0].value = "Button".to_string();
+                *color = NORMAL_BUTTON.into();
+            }
+        }
+    }
+}
 
 fn ui(mut egui_context: EguiContexts, mut app_state: ResMut<NextState<AppState>>) {
-    egui::Window::new("main menu").show(egui_context.ctx_mut(), |ui| {
-        ui.label("hi");
-        if ui.button("start game").clicked() {
-            app_state.set(AppState::InGame);
-        }
-    });
+    // egui::Window::new("main menu").show(egui_context.ctx_mut(), |ui| {
+    //     ui.label("hi");
+    //     if ui.button("start game").clicked() {
+    //         app_state.set(AppState::InGame);
+    //     }
+    // });
 }
 
 fn setup(
@@ -217,6 +247,41 @@ fn setup(
 
     //     ..Default::default()
     // });
+    commands
+        .spawn(NodeBundle {
+            style: Style {
+                size: Size::width(Val::Percent(100.0)),
+                align_items: AlignItems::Center,
+                justify_content: JustifyContent::Center,
+                ..default()
+            },
+            ..default()
+        })
+        .with_children(|parent| {
+            parent
+                .spawn(ButtonBundle {
+                    style: Style {
+                        size: Size::new(Val::Px(150.0), Val::Px(65.0)),
+                        // horizontally center child text
+                        justify_content: JustifyContent::Center,
+                        // vertically center child text
+                        align_items: AlignItems::Center,
+                        ..default()
+                    },
+                    background_color: NORMAL_BUTTON.into(),
+                    ..default()
+                })
+                .with_children(|parent| {
+                    parent.spawn(TextBundle::from_section(
+                        "Button",
+                        TextStyle {
+                            font: _blazma,
+                            font_size: 40.0,
+                            color: Color::rgb(0.9, 0.9, 0.9),
+                        },
+                    ));
+                });
+        });
 }
 
 fn setup_game(mut commands: Commands) {
