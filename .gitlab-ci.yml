@@ -34,7 +34,7 @@ publish-beta:
   stage: release
   script:
     - just publish-beta $CI_COMMIT_TAG
-    - just publish-beta-win $CI_COMMIT_TAG
+    - WINDOWS=1 just publish-beta $CI_COMMIT_TAG
   artifacts:
     paths:
       - dist
@@ -47,7 +47,7 @@ publish:
   stage: release
   script:
     - just publish $CI_COMMIT_TAG
-    - just publish-win $CI_COMMIT_TAG
+    - WINDOWS=1 just publish $CI_COMMIT_TAG
   artifacts:
     paths:
       - dist

@@ -1,7 +1,12 @@
 #!/bin/bash
 
 # Move to script's directory
-cd "`dirname "$0"`"
+cd `dirname "$0"`
+
+# if it's a symlink, move to the real directory
+if [ -L "$0" ]; then
+    cd `dirname $(readlink "$0")`
+fi
 
 # Get the kernel/architecture information
 ARCH=`uname -m`

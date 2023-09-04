@@ -26,7 +26,7 @@ package: build
     rm -rf dist
     mkdir -p dist
     mkdir -p assets
-    just {{os()}}
+    just {{target_os}}
 
 
 linux:
@@ -53,18 +53,6 @@ macos:
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
     cp itch/macos.itch.toml dist/.itch.toml
     cp -r target/release/bundle/osx/ppan.app dist/
-
-# publishes to itch
-publish version arch="64": butler package
-    ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit" --userversion {{version}}
-    just cleanup
-
-# publishes beta to itch
-publish-beta version arch="64": butler package
-    ./butler push dist "jabster28/ppan:{{os()}}-{{arch}}-bit-(beta)" --userversion {{version}}
-    just cleanup
-
-
 win:
     rm -rf dist
     mkdir -p dist
@@ -75,12 +63,15 @@ win:
     cp itch/win.itch.toml dist/.itch.toml
     cp target/x86_64-pc-windows-gnu/release/ppan.exe dist/
 
-publish-win version: win butler
-    ./butler push dist "jabster28/ppan:windows-64-bit" --userversion {{version}}
-    just cleanup
-publish-beta-win version: win butler
-    ./butler push dist "jabster28/ppan:windows-64-bit-(beta)" --userversion {{version}}
-    just cleanup
+
+# publishes to itch
+publish version arch="64": butler package
+    ./butler push dist "jabster28/ppan:{{target_os}}-{{arch}}-bit" --userversion {{version}}
+
+
+# publishes beta to itch
+publish-beta version arch="64": butler package
+    ./butler push dist "jabster28/ppan:{{target_os}}-{{arch}}-bit-(beta)" --userversion {{version}}
 
 discord_sdk:
     rm -rf discord_game_sdk
@@ -107,7 +98,7 @@ discordmacos:
 
 # make a installer for people not using the itch.io app
 installer: package
-    just installer{{os()}}
+    just installer{{target_os}}
 
 # you'll need to install create-dmg (brew install create-dmg)
 
@@ -131,3 +122,16 @@ installerlinux:
     chmod +x ppan.AppImage
     mv ppan.AppImage dist/ppan.AppImage
     rm -rf AppDir/ appimage-build
+# TODO: installer for wangblows
+installerwin:
+
+
+target_os := if env_var_or_default("WINDOWS", "0") == "1" { "win" } else {
+    ```if [ "$(uname -s)" = "Linux" ]; then
+        echo "linux"
+    elif [ "$(uname -s)" = "Darwin" ]; then
+        echo "macos"
+    else
+        echo "unknown"
+    fi```
+}
