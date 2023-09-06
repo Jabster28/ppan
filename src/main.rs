@@ -1,13 +1,17 @@
+use std::time::Duration;
+
 use bevy::prelude::*;
-// use bevy_inspector_egui::Inspectable;
-use bevy_rapier2d::prelude::{Velocity, *};
+use bevy_asset::{AssetServer, ChangeWatcher, Handle};
+use bevy_rapier2d::prelude::*;
+// use bevy_inspector_egui::quick::WorldInspectorPlugin;
+use leafwing_input_manager::prelude::*;
+mod game;
 #[cfg(feature = "discord")]
 use discord_game_sdk::Discord;
-// mod input_handlers;
-use bevy_egui::{egui, EguiContexts, EguiPlugin};
-use leafwing_input_manager::prelude::*;
+use game::{ball_collision_detection, movement, setup_game};
+use leafwing_input_manager::Actionlike;
 
-#[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
+#[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug, Reflect)]
 enum Action {
     Left,
     Right,
@@ -17,10 +21,10 @@ enum Action {
     RotateAntiClockwise,
 }
 
-use bevy_asset::{AssetServer, Handle};
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Hash, Default, States)]
 enum AppState {
     #[default]
+    Setup,
     MainMenu,
     InGame,
     Paused,
@@ -41,6 +45,9 @@ enum RotatingM {
 struct Paddle;
 #[derive(Component)]
 struct Ball;
+
+#[derive(Component)]
+struct TopLevelNode;
 
 #[derive(Component)]
 struct RotationVelocity(f32);
@@ -68,70 +75,25 @@ struct PaddleBundle {
     rot_acceleration: RotAcceleration,
     next_stop: NextStop,
     rotating: Rotating,
-    #[bundle]
     sprite: SpriteBundle,
 }
+#[derive(Component)]
+struct MenuButtonId(Option<String>);
 
-// impl PhysicsHooksWithQuery<Paddle> for BallHitIncrease {
-//     fn modify_solver_contacts(
-//         &self,
-//         context: ContactModificationContextView,
-//         paddles: &Query<Paddle>,
-//     ) {
-//         SolverFlags::all()
-//         // This is a silly example of contact modifier that does silly things
-//         // for illustration purpose:
-//         // - Flip all the contact normals.
-//         // - Delete the first contact.
-//         // - Set the friction coefficients to 0.3
-//         // - Set the restitution coefficients to 0.4
-//         // - Set the tangent velocities to X * 10.0
-//         // *context.normal = -*context.normal;
+#[derive(Event)]
+struct MenuButtonPressed(String);
 
-//         // if !context.solver_contacts.is_empty() {
-//         //     context.solver_contacts.swap_remove(0);
-//         // }
-
-//         // for solver_contact in &mut *context.solver_contacts {
-//         //     solver_contact.friction = 0.3;
-//         //     solver_contact.restitution = 0.4;
-//         //     solver_contact.tangent_velocity.x = 10.0;
-//         // }
-
-//         // // Use the persistent user-data to count the number of times
-//         // // contact modification was called for this contact manifold
-//         // // since its creation.
-//         // *context.user_data += 1;
-//         // println!(
-//         //     "Contact manifold has been modified {} times since its creation.",
-//         //     *context.user_data
-//         // );
-//         println!(
-//             "yo something happened between {} and {}",
-//             context.rigid_body1().unwrap().id(),
-//             context.rigid_body2().unwrap().id()
-//         );
-//         if self
-//             .paddles
-//             .iter()
-//             .any(|x| &x.id() == &context.rigid_body2().unwrap().id())
-//         {
-//             println!("paddle hit");
-//             // triple the velocity
-//             for solver_contact in &mut *context.raw.solver_contacts {
-//                 solver_contact.restitution = 5.0;
-//                 solver_contact.tangent_velocity.x = 2.0;
-//             }
-//         }
-//         // println!("{}", context.raw.rigid_body1.unwrap())
-//     }
-// }
+#[derive(Bundle)]
+struct MenuButtonBundle {
+    node: NodeBundle,
+    mbid: MenuButtonId,
+}
 
 fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins.set(AssetPlugin {
-            watch_for_changes: true,
+            watch_for_changes: ChangeWatcher::with_delay(Duration::from_millis(200)),
             asset_folder: if cfg!(target_os = "windows")
                 || cfg!(target_os = "linux")
                 || cfg!(debug_assertions)
@@ -145,73 +107,63 @@ fn main() {
             .to_string(),
         }),
     )
-    .add_plugin(EguiPlugin)
-    .add_plugin(InputManagerPlugin::<Action>::default())
-    .add_plugin(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0))
-    .add_plugin(RapierDebugRenderPlugin::default())
-    .add_state::<AppState>()
-    // .add_system_set(SystemSet::on_enter(AppState::InGame).with_system(setup_game))
-    .add_system(setup_game.in_schedule(OnEnter(AppState::InGame)))
-    // .add_system_set(SystemSet::on_update(AppState::MainMenu).with_system(ui))
-    .add_system(button_system.in_set(OnUpdate(AppState::MainMenu)))
-    .add_startup_system(setup)
-    // .add_system_set(SystemSet::on_enter(AppState::MainMenu).with_system(setup))
-    // .add_system_set(SystemSet::on_update(AppState::InGame).with_system(movement))
-    .add_system(movement.in_set(OnUpdate(AppState::InGame)))
-    .add_system(ball_collision_detection);
-    // if debug
-    // #[cfg(debug_assertions)]
-    // app.add_plugin(EditorPlugin);
+    // .add_plugins(EguiPlugin)
+    .add_plugins(InputManagerPlugin::<Action>::default())
+    .add_plugins(RapierPhysicsPlugin::<NoUserData>::pixels_per_meter(50.0))
+    .add_plugins(RapierDebugRenderPlugin::default())
+    .add_state::<AppState>();
+
+    // debug
+
+    // app.add_plugins(WorldInspectorPlugin::new());
+
+    // events
+
+    app.add_event::<MenuButtonPressed>();
+
+    // misc systems
+    app.add_systems(Startup, setup)
+        .add_systems(Update, input_system);
+
+    // game systems
+    app.add_systems(OnEnter(AppState::InGame), setup_game)
+        .add_systems(Update, movement.run_if(in_state(AppState::InGame)))
+        .add_systems(
+            Update,
+            ball_collision_detection.run_if(in_state(AppState::InGame)),
+        );
+
+    // menu systems
+    app.add_systems(OnEnter(AppState::MainMenu), setup_menu)
+        .add_systems(Update, menu_update.run_if(in_state(AppState::MainMenu)))
+        // exit menu
+        .add_systems(
+            OnExit(AppState::MainMenu),
+            |mut commands: Commands, query: Query<(Entity, With<TopLevelNode>)>| {
+                for entity in query.iter() {
+                    // Remove the entity if it has MenuButtonId and Button components
+                    commands.entity(entity.0).despawn_recursive();
+                }
+            },
+        );
+
+    // discord
     #[cfg(feature = "discord")]
-    app.add_startup_system(setup_discord)
-        .add_system(discord_update);
+    app.add_systems(Startup, setup_discord)
+        .add_systems(Update, discord_update);
 
     app.run();
 }
+
 const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
 const PRESSED_BUTTON: Color = Color::rgb(0.35, 0.75, 0.35);
-
-fn button_system(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &Children),
-        (Changed<Interaction>, With<Button>),
-    >,
-    mut text_query: Query<&mut Text>,
-    mut app_state: ResMut<NextState<AppState>>,
-) {
-    for (interaction, mut color, children) in &mut interaction_query {
-        let mut text = text_query.get_mut(children[0]).unwrap();
-        match *interaction {
-            Interaction::Clicked => {
-                text.sections[0].value = "Press".to_string();
-                *color = PRESSED_BUTTON.into();
-            }
-            Interaction::Hovered => {
-                text.sections[0].value = "Hover".to_string();
-                *color = HOVERED_BUTTON.into();
-            }
-            Interaction::None => {
-                text.sections[0].value = "Button".to_string();
-                *color = NORMAL_BUTTON.into();
-            }
-        }
-    }
-}
-
-fn ui(mut egui_context: EguiContexts, mut app_state: ResMut<NextState<AppState>>) {
-    // egui::Window::new("main menu").show(egui_context.ctx_mut(), |ui| {
-    //     ui.label("hi");
-    //     if ui.button("start game").clicked() {
-    //         app_state.set(AppState::InGame);
-    //     }
-    // });
-}
 
 fn setup(
     mut commands: Commands,
     mut rapier_config: ResMut<RapierConfiguration>,
     server: Res<AssetServer>,
+    mut next_state: ResMut<NextState<AppState>>,
 ) {
     rapier_config.gravity = Vec2::new(0.0, 0.0);
     commands.spawn(Camera2dBundle::default());
@@ -230,303 +182,116 @@ fn setup(
     let _noto_sans: Handle<Font> =
         server.load("Noto_Sans_Mono/NotoSansMono-VariableFont_wdth,wght.ttf");
 
-    // commands.spawn_bundle(Text2dBundle {
-    //     // set font
-    //     text: Text::from_section(
-    //         "/ppɒŋ/",
-    //         TextStyle {
-    //             font: noto_sans,
-    //             font_size: 40.0,
-    //             color: Color::WHITE,
-    //         },
+    next_state.set(AppState::MainMenu);
+}
 
-    //     ),
-    //     transform:
-    //     // centre of screen
-    //     Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+fn setup_menu(mut commands: Commands, server: Res<AssetServer>) {
+    let blazma: Handle<Font> = server.load("Blazma/Blazma-Regular.ttf");
 
-    //     ..Default::default()
-    // });
-    commands
-        .spawn(NodeBundle {
-            style: Style {
-                size: Size::width(Val::Percent(100.0)),
-                align_items: AlignItems::Center,
-                justify_content: JustifyContent::Center,
+    // spawn node bundle for buttons
+    let node = commands
+        .spawn((
+            NodeBundle {
+                style: Style {
+                    width: Val::Percent(100.0),
+                    height: Val::Percent(100.0),
+                    align_items: AlignItems::Center,
+                    justify_content: JustifyContent::Center,
+                    ..default()
+                },
                 ..default()
             },
-            ..default()
-        })
+            TopLevelNode,
+        ))
+        .id();
+
+    spawn_menu_button(
+        &mut commands,
+        "Start",
+        blazma.clone(),
+        node,
+        Some("start_game".to_string()),
+    );
+}
+fn spawn_menu_button(
+    commands: &mut Commands,
+    text: &str,
+    font: Handle<Font>,
+    node: Entity,
+    mbid: Option<String>,
+) -> Entity {
+    commands
+        .entity(node)
         .with_children(|parent| {
             parent
-                .spawn(ButtonBundle {
-                    style: Style {
-                        size: Size::new(Val::Px(150.0), Val::Px(65.0)),
-                        // horizontally center child text
-                        justify_content: JustifyContent::Center,
-                        // vertically center child text
-                        align_items: AlignItems::Center,
+                .spawn((
+                    ButtonBundle {
+                        style: Style {
+                            width: Val::Px(150.0),
+                            height: Val::Px(65.0),
+                            // horizontally center child text
+                            justify_content: JustifyContent::Center,
+                            // vertically center child text
+                            align_items: AlignItems::Center,
+                            ..default()
+                        },
+                        background_color: NORMAL_BUTTON.into(),
                         ..default()
                     },
-                    background_color: NORMAL_BUTTON.into(),
-                    ..default()
-                })
+                    MenuButtonId(mbid),
+                ))
                 .with_children(|parent| {
                     parent.spawn(TextBundle::from_section(
-                        "Button",
+                        text,
                         TextStyle {
-                            font: _blazma,
+                            font,
                             font_size: 40.0,
                             color: Color::rgb(0.9, 0.9, 0.9),
                         },
                     ));
                 });
-        });
-}
-
-fn setup_game(mut commands: Commands) {
-    let default_map = InputMap::new([
-        (KeyCode::A, Action::Left),
-        (KeyCode::D, Action::Right),
-        (KeyCode::W, Action::Up),
-        (KeyCode::S, Action::Down),
-        (KeyCode::C, Action::RotateAntiClockwise),
-        (KeyCode::V, Action::RotateClockwise),
-    ]);
-    commands
-        .spawn(TransformBundle::from(Transform::from_xyz(-500.0, 0.0, 0.0)))
-        .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(0.0, 1000.0))
-        .insert(Restitution::coefficient(0.0));
-    commands
-        .spawn(TransformBundle::from(Transform::from_xyz(500.0, 0.0, 0.0)))
-        .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(0.0, 1000.0))
-        .insert(Restitution::coefficient(0.0));
-    commands
-        .spawn(TransformBundle::from(Transform::from_xyz(0.0, -250.0, 0.0)))
-        .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(1000.0, 0.0))
-        .insert(Restitution::coefficient(0.0));
-    commands
-        .spawn(TransformBundle::from(Transform::from_xyz(0.0, 250.0, 0.0)))
-        .insert(RigidBody::Fixed)
-        .insert(Collider::cuboid(1000.0, 0.0))
-        .insert(Restitution::coefficient(0.0));
-
-    commands
-        .spawn(TransformBundle::from(Transform::from_xyz(50.0, 0.0, 0.0)))
-        .insert(RigidBody::Dynamic)
-        .insert(Ball)
-        .insert(Collider::ball(15.0))
-        .insert(CollidingEntities::default())
-        // add external imp
-        .insert(ExternalImpulse::default())
-        // .insert(ActiveHooks::MODIFY_SOLVER_CONTACTS)
-        .insert(Restitution::coefficient(1.2))
-        .insert(Velocity {
-            linvel: Vec2::new(1.0, 2.0),
-            angvel: 0.4,
         })
-        .insert(ActiveEvents::COLLISION_EVENTS)
-        .insert(ActiveCollisionTypes::all())
-        .insert(TransformBundle::from(Transform::from_xyz(400.0, 0.0, 0.0)));
-
-    for _ in 0..1 {
-        // let mut commands = world.get_resource_mut::<Commands>().unwrap();
-        commands
-            .spawn(PaddleBundle {
-                flags: ActiveEvents::COLLISION_EVENTS,
-                active_collision_types: ActiveCollisionTypes::default(),
-                rotation_velocity: RotationVelocity(0.0),
-                acceleration: Acceleration(60.0),
-                rot_acceleration: RotAcceleration(0.0005),
-                next_stop: NextStop(0.0),
-                rotating: Rotating(RotatingM::Neither),
-                sprite: SpriteBundle {
-                    sprite: Sprite {
-                        color: Color::rgb(0.5, 0.5, 1.0),
-                        custom_size: Some(Vec2::new(30.0, 150.0)),
-                        ..Default::default()
-                    },
-                    ..Default::default()
-                },
-            })
-            .insert(Paddle)
-            .insert(InputManagerBundle::<Action> {
-                // Stores "which actions are currently pressed"
-                action_state: ActionState::default(),
-                // Describes how to convert from player inputs into those actions
-                input_map: default_map.clone(),
-            })
-            .insert(RigidBody::Dynamic)
-            .insert(Damping {
-                linear_damping: 1.7,
-                angular_damping: 1.0,
-            })
-            .insert(Velocity {
-                linvel: Vec2::new(0.0, 0.0),
-                angvel: 0.0,
-            })
-            .insert(Collider::cuboid(15.0, 75.0))
-            .insert(CollidingEntities::default())
-            .insert(TransformBundle::from(Transform::from_xyz(0.0, 0.0, 0.0)));
-        // world.resource_scope(|_, mut table: Mut<Table>| {
-        // table.paddles[i].push(paddle);
-        // });
-    }
-    // commands.insert_resource(PhysicsHooksWithQueryResource(Box::new(BallHitIncrease {
-    //     paddles: paddles,
-    // })));
+        .id()
 }
 
-fn movement(
-    mut query: Query<
-        (
-            &ActionState<Action>,
-            &Acceleration,
-            &mut NextStop,
-            &mut Rotating,
-            &mut Velocity,
-            &mut Transform,
-            &RotAcceleration,
-        ),
-        With<Paddle>,
+fn menu_update(
+    _commands: Commands,
+    mut menu_button_pressed: EventReader<MenuButtonPressed>,
+    _app_state: ResMut<State<AppState>>,
+    mut next_state: ResMut<NextState<AppState>>,
+) {
+    for MenuButtonPressed(id) in &mut menu_button_pressed {
+        match id.as_str() {
+            "start_game" => next_state.set(AppState::InGame),
+            _ => {}
+        }
+    }
+}
+
+fn input_system(
+    mut interaction_query: Query<
+        (&Interaction, &mut BackgroundColor, &Children, &MenuButtonId),
+        (Changed<Interaction>, With<Button>),
     >,
+    mut text_query: Query<&mut Text>,
+    _app_state: ResMut<NextState<AppState>>,
+    mut menupressed: EventWriter<MenuButtonPressed>,
 ) {
-    for (
-        action_state,
-        acceleration,
-        mut next_stop,
-        mut rotating,
-        mut vel,
-        mut transform,
-        rot_acceleration,
-    ) in query.iter_mut()
-    {
-        // convert to degrees
-        let mut rotation_deg = 180.0 - transform.rotation.to_euler(EulerRot::YXZ).2.to_degrees();
-        // if the diff between rotation and the next stop is less than .1, set the rotation to the next stop
-        if (rotating.0 == RotatingM::AntiClockwise || rotating.0 == RotatingM::Clockwise)
-            && (rotation_deg - next_stop.0).abs() < 20.0
-        {
-            rotating.0 = RotatingM::Neither;
-        }
-
-        if rotating.0 == RotatingM::Clockwise && rotating.0 == RotatingM::AntiClockwise {
-            // only keep cw
-            rotating.0 = RotatingM::Clockwise;
-        }
-
-        if action_state.pressed(Action::RotateAntiClockwise) {
-            rotating.0 = RotatingM::AntiClockwise;
-            // get next 90 degree rotation to the left
-            next_stop.0 = 90.0 * (rotation_deg / 90.0).round() - 90.0;
-            while next_stop.0 < 0.0 {
-                next_stop.0 += 360.0;
-            }
-            next_stop.0 %= 360.0;
-        }
-
-        if action_state.pressed(Action::RotateClockwise) {
-            rotating.0 = RotatingM::Clockwise;
-            // get next 90 degree rotation to the right
-            next_stop.0 = 90.0 * (rotation_deg / 90.0).round() + 90.0;
-            while next_stop.0 < 0.0 {
-                next_stop.0 += 360.0;
-            }
-            next_stop.0 %= 360.0;
-        }
-        if (rotation_deg - next_stop.0).abs() < 0.1 {
-            transform.rotate_z((next_stop.0 - rotation_deg).to_radians());
-            rotation_deg = next_stop.0;
-            rotating.0 = RotatingM::Neither;
-        }
-        // let rotation = {
-        //     let mut newrot = rotation;
-        //     while newrot < 0.0 {
-        //         newrot += 360.0;
-        //     }
-        //     newrot % 360.0
-        // };
-
-        // println!("rotation: {}", rotation);
-
-        // let _rot_accel = 0.8;
-        // let (width, _height) = (10.0, 10.0);
-        // let mut vel = (0.0, 0.0);
-        // let rotation = transform.rotation;
-        if action_state.pressed(Action::Right) {
-            vel.linvel.x += acceleration.0;
-        }
-        if action_state.pressed(Action::Left) {
-            vel.linvel.x -= acceleration.0;
-        }
-        if action_state.pressed(Action::Down) {
-            vel.linvel.y -= acceleration.0;
-        }
-        if action_state.pressed(Action::Up) {
-            vel.linvel.y += acceleration.0;
-        }
-        if (rotation_deg - next_stop.0).abs() > 2.0 {
-            let displacement_clockwise = if rotation_deg < next_stop.0 {
-                next_stop.0 - rotation_deg
-            } else {
-                next_stop.0 + (360.0 - rotation_deg)
-            };
-            let displacement_counterclockwise = if rotation_deg > next_stop.0 {
-                next_stop.0 - rotation_deg
-            } else {
-                next_stop.0 - rotation_deg - 360.0
-            };
-            println!("{rotation_deg}d {displacement_clockwise} {displacement_counterclockwise}");
-
-            let displacement = match rotating.0 {
-                RotatingM::Neither => {
-                    // go for the closest one
-                    if (displacement_clockwise).abs() < (displacement_counterclockwise).abs() {
-                        displacement_clockwise
-                    } else {
-                        displacement_counterclockwise
-                    }
+    for (interaction, mut color, children, mbid) in &mut interaction_query {
+        let _text = text_query.get_mut(children[0]).unwrap();
+        match *interaction {
+            Interaction::Pressed => {
+                *color = PRESSED_BUTTON.into();
+                if let Some(id) = &mbid.0 {
+                    menupressed.send(MenuButtonPressed(id.clone()));
                 }
-                RotatingM::Clockwise => displacement_clockwise,
-                RotatingM::AntiClockwise => displacement_counterclockwise,
-            };
-
-            let mut rotation_velocity = (2.0 * rot_acceleration.0 * displacement.abs()).sqrt();
-            if displacement < 0.0 {
-                rotation_velocity *= -1.0;
             }
-            println!(
-                "nxs {} disp {} vel {} d {:?}",
-                next_stop.0, displacement, rotation_velocity, rotating.0
-            );
-
-            transform.rotate_z(-rotation_velocity);
-        } else {
-            // just get closer to the next stop
-            transform.rotate_z(-(next_stop.0 - rotation_deg).to_radians() / 5.0);
-        }
-    }
-}
-
-fn ball_collision_detection(
-    // commands: Commands,
-    mut ball_query: Query<(&mut Velocity, Entity), With<Ball>>,
-    colliding_entities_query: Query<&CollidingEntities, With<Paddle>>,
-) {
-    for colliding_entities in colliding_entities_query.iter() {
-        for (mut vel, ball_ent) in ball_query.iter_mut() {
-            if colliding_entities.contains(ball_ent) {
-                println!("collision detected");
-                // commands.despawn(ball_ent);
-                // commands.spawn((Ball, Transform::from_translation(Vec3::new(400.0, 300.0, 0.0))));
-                // make the ball go faster
-                // imp.impulse += Vec2::new(100.0, 100.0)
-                vel.linvel *= 2.5;
+            Interaction::Hovered => {
+                *color = HOVERED_BUTTON.into();
             }
-            // println!("vel: {:?}", vel.linvel);
+            Interaction::None => {
+                *color = NORMAL_BUTTON.into();
+            }
         }
     }
 }

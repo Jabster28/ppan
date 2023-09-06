@@ -6,3 +6,4 @@ imports_layout = "HorizontalVertical"
 normalize_comments = true
 normalize_doc_attributes = true
 reorder_impl_items = true
+group_imports = "StdExternalCrate"
