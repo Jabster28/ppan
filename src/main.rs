@@ -3,7 +3,6 @@ use std::time::Duration;
 use bevy::prelude::*;
 use bevy_asset::{AssetServer, ChangeWatcher, Handle};
 use bevy_rapier2d::prelude::*;
-// use bevy_inspector_egui::quick::WorldInspectorPlugin;
 use leafwing_input_manager::prelude::*;
 mod game;
 #[cfg(feature = "discord")]
@@ -113,9 +112,11 @@ fn main() {
     .add_plugins(RapierDebugRenderPlugin::default())
     .add_state::<AppState>();
 
-    // debug
-
-    // app.add_plugins(WorldInspectorPlugin::new());
+    #[cfg(debug_assertions)]
+    {
+        use bevy_inspector_egui::quick::WorldInspectorPlugin;
+        app.add_plugins(WorldInspectorPlugin::new());
+    }
 
     // events
 
