@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use bevy::prelude::*;
-use bevy_asset::{AssetServer, ChangeWatcher, Handle};
+use bevy_asset::{AssetServer, Handle};
 use bevy_rapier2d::prelude::*;
 use leafwing_input_manager::prelude::*;
 mod game;
@@ -92,8 +92,8 @@ fn main() {
     let mut app = App::new();
     app.add_plugins(
         DefaultPlugins.set(AssetPlugin {
-            watch_for_changes: ChangeWatcher::with_delay(Duration::from_millis(200)),
-            asset_folder: if cfg!(target_os = "windows")
+            watch_for_changes_override: None,
+            file_path: if cfg!(target_os = "windows")
                 || cfg!(target_os = "linux")
                 || cfg!(debug_assertions)
             {
@@ -104,6 +104,8 @@ fn main() {
                 panic!("unsupported os")
             }
             .to_string(),
+            processed_file_path: "proc_assets".to_string(),
+            mode: AssetMode::Unprocessed,
         }),
     )
     // .add_plugins(EguiPlugin)
@@ -261,7 +263,7 @@ fn menu_update(
     _app_state: ResMut<State<AppState>>,
     mut next_state: ResMut<NextState<AppState>>,
 ) {
-    for MenuButtonPressed(id) in &mut menu_button_pressed {
+    for MenuButtonPressed(id) in &mut menu_button_pressed.read() {
         match id.as_str() {
             "start_game" => next_state.set(AppState::InGame),
             _ => {}
@@ -276,7 +278,7 @@ fn input_system(
     >,
     mut text_query: Query<&mut Text>,
     _app_state: ResMut<NextState<AppState>>,
-    mut menupressed: EventWriter<MenuButtonPressed>,
+    mut menu_pressed: EventWriter<MenuButtonPressed>,
 ) {
     for (interaction, mut color, children, mbid) in &mut interaction_query {
         let _text = text_query.get_mut(children[0]).unwrap();
@@ -284,7 +286,7 @@ fn input_system(
             Interaction::Pressed => {
                 *color = PRESSED_BUTTON.into();
                 if let Some(id) = &mbid.0 {
-                    menupressed.send(MenuButtonPressed(id.clone()));
+                    menu_pressed.send(MenuButtonPressed(id.clone()));
                 }
             }
             Interaction::Hovered => {

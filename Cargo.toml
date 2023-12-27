@@ -19,13 +19,13 @@ icon = ["ppan.icns"]
 hostname = "0.3.1"
 local-ip-address = "0.5.3"
 serde = "^1.0.145"
-bevy = { version = "0.11.2" }
+bevy = { version = "0.12.1" }
 discord_game_sdk = { version = "1.0.1", optional = true }
-bevy-inspector-egui = "0.19.0"
+bevy-inspector-egui = "0.21.0"
 # bevy_editor_pls = "0.4.0"
-bevy_asset = "0.11.2"
-leafwing-input-manager = "0.10.0"
-bevy_rapier2d = "0.22.0"
+bevy_asset = "0.12.1"
+leafwing-input-manager = "0.11.2"
+bevy_rapier2d = "0.23.0"
 # bevy_egui = "0.21.0"
 
 [features]
