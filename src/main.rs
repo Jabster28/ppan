@@ -14,7 +14,9 @@ use bevy_tweening::{
     TweeningPlugin,
 };
 use leafwing_input_manager::prelude::*;
+mod calc;
 mod game;
+
 use bevy_screen_diagnostics::{ScreenDiagnosticsPlugin, ScreenFrameDiagnosticsPlugin};
 #[cfg(feature = "discord")]
 use discord_game_sdk::Discord;
