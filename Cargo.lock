@@ -976,6 +976,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "bevy_screen_diagnostics"
+version = "0.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8bbf77cc9e14ad65affe1ac0cf49956a1c42de4c167cd2d5a95dc0699009c3b4"
+dependencies = [
+ "bevy",
+]
+
+[[package]]
 name = "bevy_sprite"
 version = "0.12.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1065,6 +1074,16 @@ dependencies = [
  "bevy_reflect",
  "serde",
  "thiserror",
+]
+
+[[package]]
+name = "bevy_tweening"
+version = "0.9.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "216b3cb82fd0d149c5a9abfb5e382d8a671ff469f8759116e091c710bfa37139"
+dependencies = [
+ "bevy",
+ "interpolation",
 ]
 
 [[package]]
@@ -2316,6 +2335,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "interpolation"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d3b7357d2bbc5ee92f8e899ab645233e43d21407573cceb37fed8bc3dede2c02"
+
+[[package]]
 name = "io-kit-sys"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3227,6 +3252,8 @@ dependencies = [
  "bevy-inspector-egui",
  "bevy_asset",
  "bevy_rapier2d",
+ "bevy_screen_diagnostics",
+ "bevy_tweening",
  "discord_game_sdk",
  "hostname",
  "leafwing-input-manager",

@@ -5,3 +5,4 @@ tests/
 discord_game_sdk/
 env.sh
 .DS_Store
+.bacon-locations

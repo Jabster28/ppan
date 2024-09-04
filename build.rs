@@ -9,7 +9,7 @@ fn main() {
         .output()
     {
         Ok(output) => str::from_utf8(output.stdout.as_slice())
-            .unwrap()
+            .expect("failed to parse git tag")
             .trim()
             .to_string(),
         Err(e) => {

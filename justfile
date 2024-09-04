@@ -2,16 +2,16 @@ set shell := ["bash", "-uc"]
 default:
   just --list
 test:
-    cargo fmt -- --check
-    cargo test
-    cargo clippy -- -W clippy::pedantic
+    cargo +nightly-2024-02-01 fmt -- --check
+    cargo +nightly-2024-02-01 test
+    cargo +nightly-2024-02-01 clippy -- -W clippy::pedantic
 
 run:
-    cargo run --features bevy/dynamic_linking
+    cargo +nightly-2024-02-01 run --features bevy/dynamic_linking
 
 build:
     @touch discord_game_sdk/c/discord_game_sdk.h || just discord_sdk
-    . ./env.sh && cargo build --release --all-features
+    . ./env.sh && cargo +nightly-2024-02-01 build --release --all-features
 
 # installs butler (only works on linux tho)
 butler:
@@ -31,7 +31,7 @@ package: build
 
 linux:
     mkdir -p dist/assets
-    cargo install copydeps
+    cargo +nightly-2024-02-01 install copydeps
     cp -r assets dist/
     cp itch/linux.itch.toml dist/.itch.toml
     cp target/release/ppan dist/ppan.{{arch()}}
@@ -45,9 +45,9 @@ linux:
 
 # you'll need to install dylibbundler (brew install dylibbundler)
 macos:
-    cargo install cargo-bundle
+    cargo +nightly-2024-02-01 install cargo-bundle
     magick ppan.png -sample 1028x1028 512x512@2x.png
-    . ./env.sh && cargo bundle --release --all-features
+    . ./env.sh && cargo +nightly-2024-02-01 bundle --release --all-features
     rm 512x512@2x.png
     . ./env.sh && dylibbundler --search-path $DISCORD_GAME_SDK_PATH/lib/x86_64  -od -b -x target/release/bundle/osx/ppan.app/Contents/MacOS/ppan -d target/release/bundle/osx/ppan.app/Contents/Frameworks -p @executable_path/../Frameworks/
     cp -r assets target/release/bundle/osx/ppan.app/Contents/MacOS/assets
@@ -58,7 +58,7 @@ win:
     mkdir -p dist
     apt-get install mingw-w64 -qq
     rustup target add x86_64-pc-windows-gnu
-    cargo build --target x86_64-pc-windows-gnu --release
+    cargo +nightly-2024-02-01 build --target x86_64-pc-windows-gnu --release
     cp -r assets dist/
     cp itch/win.itch.toml dist/.itch.toml
     cp target/x86_64-pc-windows-gnu/release/ppan.exe dist/
