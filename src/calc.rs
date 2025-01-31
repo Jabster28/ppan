@@ -1,8 +1,13 @@
+use std::f32::consts::PI;
+
 use bevy::prelude::*;
 use bevy_rapier2d::prelude::Velocity;
 use leafwing_input_manager::prelude::*;
 
 use crate::{Acceleration, Action, NextStop, RotAcceleration, Rotating, RotatingM};
+
+pub const ACCELERATION: Acceleration = Acceleration(60.0);
+pub const ROT_ACCELERATION: RotAcceleration = RotAcceleration(0.0003);
 
 pub fn paddle_sim(
     mut transform: Mut<'_, Transform>,
@@ -13,12 +18,14 @@ pub fn paddle_sim(
     acceleration: &Acceleration,
     rot_acceleration: &RotAcceleration,
 ) {
+    // -- Reading actions
+
     // convert to degrees
     let mut rotation_deg = 180.0 - transform.rotation.to_euler(EulerRot::YXZ).2.to_degrees();
 
     // if the diff between rotation and the next stop is less than .1, set the rotation to the next stop
     if (rotating.0 == RotatingM::AntiClockwise || rotating.0 == RotatingM::Clockwise)
-        && (rotation_deg - next_stop.0).abs() < 20.0
+        && (rotation_deg - next_stop.0).abs() < 5.0
     {
         rotating.0 = RotatingM::Neither;
     }
@@ -41,31 +48,18 @@ pub fn paddle_sim(
     if action_state.pressed(Action::RotateClockwise) {
         rotating.0 = RotatingM::Clockwise;
         // get next 90 degree rotation to the right
-        next_stop.0 = 90.0 * (rotation_deg / 90.0).round() + 90.0;
+        next_stop.0 = 90.0f32.mul_add((rotation_deg / 90.0).round(), 90.0);
         while next_stop.0 < 0.0 {
             next_stop.0 += 360.0;
         }
         next_stop.0 %= 360.0;
     }
     if (rotation_deg - next_stop.0).abs() < 0.1 {
-        transform.rotate_z((next_stop.0 - rotation_deg).to_radians());
+        transform.rotation = Quat::from_rotation_z(next_stop.0.to_radians());
         rotation_deg = next_stop.0;
         rotating.0 = RotatingM::Neither;
     }
-    // let rotation = {
-    //     let mut newrot = rotation;
-    //     while newrot < 0.0 {
-    //         newrot += 360.0;
-    //     }
-    //     newrot % 360.0
-    // };
 
-    // println!("rotation: {}", rotation);
-
-    // let _rot_accel = 0.8;
-    // let (width, _height) = (10.0, 10.0);
-    // let mut vel = (0.0, 0.0);
-    // let rotation = transform.rotation;
     if action_state.pressed(Action::Right) {
         vel.linvel.x += acceleration.0;
     }
@@ -78,6 +72,9 @@ pub fn paddle_sim(
     if action_state.pressed(Action::Up) {
         vel.linvel.y += acceleration.0;
     }
+
+    // -- Calculation
+
     if (rotation_deg - next_stop.0).abs() > 2.0 {
         let displacement_clockwise = if rotation_deg < next_stop.0 {
             next_stop.0 - rotation_deg

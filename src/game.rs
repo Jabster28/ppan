@@ -74,8 +74,8 @@ pub fn setup_game(mut commands: Commands) {
                 flags: ActiveEvents::COLLISION_EVENTS,
                 active_collision_types: ActiveCollisionTypes::default(),
                 rotation_velocity: RotationVelocity(0.0),
-                acceleration: Acceleration(60.0),
-                rot_acceleration: RotAcceleration(0.0005),
+                acceleration: calc::ACCELERATION,
+                rot_acceleration: calc::ROT_ACCELERATION,
                 next_stop: NextStop(0.0),
                 rotating: Rotating(RotatingM::Neither),
                 sprite: SpriteBundle {
